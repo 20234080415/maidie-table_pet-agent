@@ -1,0 +1,37 @@
+# Python caches and build output
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local configuration and secrets
+maidie_desktop_pet/config/config.json
+.env
+.env.*
+!.env.example
+
+# Local runtime data
+*.log
+*.sqlite
+*.sqlite3
+maidie_desktop_pet/data/
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Generated image workflow artifacts
+hatch-run/

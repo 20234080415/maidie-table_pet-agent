@@ -1,0 +1,1 @@
+"""Maidie test suite."""

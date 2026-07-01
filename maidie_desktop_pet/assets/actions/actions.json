@@ -1,0 +1,74 @@
+{
+  "headpat": {
+    "file": "headpat.webp",
+    "frames": 6,
+    "interval": 150,
+    "render_scale": 1.0,
+    "loop": false,
+    "duration_ms": 1100,
+    "cooldown_ms": 850,
+    "priority": 100,
+    "state": "reacting",
+    "interaction_region": "head",
+    "gesture": "stroke-horizontal"
+  },
+  "facepoke": {
+    "file": "facepoke.webp",
+    "frames": 6,
+    "interval": 155,
+    "render_scale": 1.0,
+    "loop": false,
+    "duration_ms": 1100,
+    "cooldown_ms": 900,
+    "priority": 100,
+    "state": "reacting",
+    "interaction_region": "face"
+  },
+  "shy": {
+    "file": "shy.webp",
+    "frames": 6,
+    "interval": 175,
+    "render_scale": 1.0,
+    "loop": false,
+    "duration_ms": 3000,
+    "cooldown_ms": 5000,
+    "priority": 60,
+    "state": "talking",
+    "triggers": ["可爱", "喜欢你", "爱你", "漂亮", "cute", "love"]
+  },
+  "celebrate": {
+    "file": "celebrate.webp",
+    "frames": 6,
+    "interval": 140,
+    "render_scale": 1.0,
+    "loop": false,
+    "duration_ms": 3000,
+    "cooldown_ms": 4000,
+    "priority": 60,
+    "state": "talking",
+    "triggers": ["成功", "完成", "搞定", "太好了", "谢谢", "thank", "success"]
+  },
+  "sleepy": {
+    "file": "sleepy.webp",
+    "frames": 6,
+    "interval": 240,
+    "render_scale": 1.0,
+    "loop": false,
+    "duration_ms": 1600,
+    "cooldown_ms": 30000,
+    "priority": 20,
+    "state": "sleeping"
+  },
+  "dizzy-right": {
+    "file": "dizzy-right.webp",
+    "frames": 6,
+    "interval": 155,
+    "render_scale": 1.0,
+    "loop": false,
+    "duration_ms": 1100,
+    "cooldown_ms": 1500,
+    "priority": 100,
+    "state": "reacting",
+    "gesture": "drag-right"
+  }
+}
