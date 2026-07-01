@@ -45,6 +45,9 @@ class AIClient(ABC):
         on_delta(result["text"])
         return result
 
+    def extract_memories(self, message: str, response: str) -> dict[str, list[Any]]:
+        return {"facts": [], "preferences": []}
+
 
 class OpenAICompatibleClient(AIClient):
     """Reusable OpenAI-compatible backend for chat or Codex-style reasoning."""
@@ -115,6 +118,9 @@ class OpenAICompatibleClient(AIClient):
             system_prompt += f"\nCurrent personality: {self.personality_prompt}"
         messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
         for item in context[-10:]:
+            if item.get("memory"):
+                messages.append({"role": "system", "content": str(item["memory"])})
+                continue
             messages.extend([
                 {"role": "user", "content": str(item.get("message", ""))},
                 {"role": "assistant", "content": str(item.get("response", ""))},
@@ -154,6 +160,9 @@ class OpenAICompatibleClient(AIClient):
             streaming_prompt += f"\nCurrent personality: {self.personality_prompt}"
         messages: list[dict[str, str]] = [{"role": "system", "content": streaming_prompt}]
         for item in context[-10:]:
+            if item.get("memory"):
+                messages.append({"role": "system", "content": str(item["memory"])})
+                continue
             messages.extend([
                 {"role": "user", "content": str(item.get("message", ""))},
                 {"role": "assistant", "content": str(item.get("response", ""))},
@@ -194,6 +203,48 @@ class OpenAICompatibleClient(AIClient):
             "action": "talk",
             "state": "talking",
         }, self.source)
+
+    def extract_memories(self, message: str, response: str) -> dict[str, list[Any]]:
+        """Extract durable, non-sensitive user memories from one exchange."""
+        if not self.api_key or self.api_key == "YOUR_API_KEY_HERE":
+            return {"facts": [], "preferences": []}
+        prompt = (
+            "从下面这一轮对话中提取值得长期记住的用户事实和偏好。"
+            "不要提取密码、API Key、令牌、身份证件、银行卡、联系方式、地址、"
+            "健康隐私或其他敏感信息。临时问题和助手自己的内容不要记忆。"
+            "只返回 JSON：{\"facts\":[{\"key\":\"\",\"value\":\"\","
+            "\"importance\":0.7}],\"preferences\":[{\"key\":\"\","
+            "\"value\":\"\",\"importance\":0.9}]}。没有内容时数组为空。\n"
+            f"用户：{message}\n助手：{response}"
+        )
+        try:
+            api_response = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": "你是严格的非敏感记忆提取器。"},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0,
+                    "response_format": {"type": "json_object"},
+                    "max_tokens": 800,
+                },
+                timeout=self.timeout,
+            )
+            api_response.raise_for_status()
+            content = api_response.json()["choices"][0]["message"]["content"]
+            result = json.loads(content)
+            return {
+                "facts": result.get("facts", []) if isinstance(result, dict) else [],
+                "preferences": result.get("preferences", []) if isinstance(result, dict) else [],
+            }
+        except Exception:
+            return {"facts": [], "preferences": []}
 
     def reconfigure(
         self,

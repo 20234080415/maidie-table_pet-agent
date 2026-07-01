@@ -41,6 +41,12 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertIn("安静", self.store.personality_prompt(saved))
         self.assertEqual(saved["window"]["width"], 160)
 
+    def test_missing_network_settings_use_safe_defaults(self):
+        saved = self.store.load()
+        self.assertFalse(saved["network"]["enabled"])
+        self.assertEqual(saved["network"]["timeout"], 10)
+        self.assertNotIn("network_search_api_key", self.store.public_settings())
+
 
 if __name__ == "__main__":
     unittest.main()

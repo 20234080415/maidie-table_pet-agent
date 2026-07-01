@@ -3,3 +3,5 @@ __pycache__/
 .venv/
 logs/
 memory/conversations.json
+memory/memories.db
+memory/memories.db-*

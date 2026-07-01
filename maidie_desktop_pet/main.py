@@ -12,6 +12,8 @@ from ai.router import AIRouter
 from core.pet import PetController
 from core.actions import ActionRegistry
 from core.settings import ConfigStore
+from core.plugins.network import NetworkPlugin
+from core.tools import TimeTool, ToolRegistry, WeatherTool
 from input.manager import InputManager
 from memory.memory import ConversationMemory
 from ui.window import PetWindow
@@ -32,9 +34,16 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
     chat_client, codex_client = OpenAICompatibleClient.clients_from_config(
         ROOT / "config" / "config.json"
     )
-    router = AIRouter(chat_client=chat_client, codex_client=codex_client)
+    network_plugin = NetworkPlugin(config.get("network", {}))
+    tool_registry = ToolRegistry([TimeTool(), WeatherTool()])
+    router = AIRouter(
+        chat_client=chat_client,
+        codex_client=codex_client,
+        network_plugin=network_plugin,
+        tool_registry=tool_registry,
+    )
     chat_client.personality_prompt = config_store.personality_prompt(config)
-    memory = ConversationMemory(ROOT / "memory" / "conversations.json")
+    memory = ConversationMemory(ROOT / "memory" / "memories.db")
 
     movement_options = dict(config.get("movement", {}))
     cursor_chase = bool(movement_options.pop("cursor_chase", False))
@@ -47,6 +56,7 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
         action_registry=ActionRegistry(ROOT / "assets" / "actions" / "actions.json"),
     )
     controller.cursor_chase = cursor_chase
+    controller.register_plugin(network_plugin)
     window = PetWindow(
         controller=controller,
         assets_dir=ROOT / "assets",

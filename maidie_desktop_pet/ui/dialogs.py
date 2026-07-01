@@ -4,6 +4,7 @@ import html
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -11,6 +12,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSpinBox,
     QTabWidget,
     QTextBrowser,
     QTextEdit,
@@ -86,6 +88,7 @@ class SettingsDialog(QDialog):
         tabs = QTabWidget()
         tabs.addTab(self._build_personality_tab(), "性格")
         tabs.addTab(self._build_model_tab(), "模型与 API")
+        tabs.addTab(self._build_network_tab(), "联网查询")
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
@@ -149,6 +152,41 @@ class SettingsDialog(QDialog):
         layout.addRow("", note)
         return page
 
+    def _build_network_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QFormLayout(page)
+        self.network_enabled = QCheckBox("允许 Maidie 按当前问题联网查询")
+        self.network_enabled.setChecked(self.settings.get("network_enabled", False))
+        self.network_provider = QComboBox()
+        self.network_provider.addItem("Tavily", "tavily")
+        index = self.network_provider.findData(
+            self.settings.get("network_search_provider", "tavily")
+        )
+        self.network_provider.setCurrentIndex(max(0, index))
+        self.network_api_key = QLineEdit()
+        self.network_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.network_api_key.setPlaceholderText(
+            "已配置；留空保持不变"
+            if self.settings.get("has_network_api_key") else "输入 Tavily API Key"
+        )
+        self.network_timeout = QSpinBox()
+        self.network_timeout.setRange(1, 120)
+        self.network_timeout.setSuffix(" 秒")
+        self.network_timeout.setValue(self.settings.get("network_timeout", 10))
+        self.network_show_sources = QCheckBox("在回答中显示来源")
+        self.network_show_sources.setChecked(
+            self.settings.get("network_show_sources", True)
+        )
+        note = QLabel("联网默认关闭。开启后，只会把当前问题发送给所选搜索服务。")
+        note.setWordWrap(True)
+        layout.addRow("联网开关", self.network_enabled)
+        layout.addRow("搜索服务", self.network_provider)
+        layout.addRow("搜索 API Key", self.network_api_key)
+        layout.addRow("请求超时", self.network_timeout)
+        layout.addRow("来源", self.network_show_sources)
+        layout.addRow("", note)
+        return page
+
     def _save(self) -> None:
         values = {
             "provider": self.provider.currentData(),
@@ -158,6 +196,11 @@ class SettingsDialog(QDialog):
             "api_key": self.api_key.text().strip(),
             "personality_preset": self.personality.currentData(),
             "custom_personality": self.custom_personality.toPlainText().strip(),
+            "network_enabled": self.network_enabled.isChecked(),
+            "network_timeout": self.network_timeout.value(),
+            "network_show_sources": self.network_show_sources.isChecked(),
+            "network_search_provider": self.network_provider.currentData(),
+            "network_search_api_key": self.network_api_key.text().strip(),
         }
         if not values["base_url"] or not values["chat_model"] or not values["technical_model"]:
             return

@@ -15,6 +15,14 @@ PERSONALITY_PRESETS = {
     "custom": ("自定义", ""),
 }
 
+NETWORK_DEFAULTS = {
+    "enabled": False,
+    "timeout": 10,
+    "show_sources": True,
+    "search_provider": "tavily",
+    "search_api_key": "",
+}
+
 
 class ConfigStore:
     """Thread-safe JSON settings with atomic replacement and secret-safe views."""
@@ -25,13 +33,18 @@ class ConfigStore:
 
     def load(self) -> dict[str, Any]:
         with self._lock:
-            return json.loads(self.path.read_text(encoding="utf-8"))
+            config = json.loads(self.path.read_text(encoding="utf-8"))
+            network = config.setdefault("network", {})
+            for key, value in NETWORK_DEFAULTS.items():
+                network.setdefault(key, value)
+            return config
 
     def public_settings(self) -> dict[str, Any]:
         config = self.load()
         ai = config.get("ai", {})
         technical = config.get("codex", {})
         personality = config.get("personality", {})
+        network = config.get("network", {})
         key = str(ai.get("api_key", ""))
         return {
             "provider": ai.get("provider", "deepseek"),
@@ -41,6 +54,11 @@ class ConfigStore:
             "personality_preset": personality.get("preset", "gentle_tsundere"),
             "custom_personality": personality.get("custom_prompt", ""),
             "has_api_key": bool(key and key != "YOUR_API_KEY_HERE"),
+            "network_enabled": bool(network.get("enabled", False)),
+            "network_timeout": int(network.get("timeout", 10)),
+            "network_show_sources": bool(network.get("show_sources", True)),
+            "network_search_provider": str(network.get("search_provider", "tavily")),
+            "has_network_api_key": bool(network.get("search_api_key", "")),
         }
 
     def update_user_settings(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -49,6 +67,7 @@ class ConfigStore:
             ai = config.setdefault("ai", {})
             technical = config.setdefault("codex", {})
             personality = config.setdefault("personality", {})
+            network = config.setdefault("network", {})
             ai["provider"] = str(values.get("provider", ai.get("provider", "deepseek")))
             ai["base_url"] = str(values.get("base_url", ai.get("base_url", ""))).rstrip("/")
             ai["model"] = str(values.get("chat_model", ai.get("model", "")))
@@ -60,6 +79,13 @@ class ConfigStore:
             if new_key:
                 ai["api_key"] = new_key
                 technical["api_key"] = new_key
+            network["enabled"] = bool(values.get("network_enabled", network.get("enabled", False)))
+            network["timeout"] = max(1, int(values.get("network_timeout", network.get("timeout", 10))))
+            network["show_sources"] = bool(values.get("network_show_sources", network.get("show_sources", True)))
+            network["search_provider"] = str(values.get("network_search_provider", network.get("search_provider", "tavily")))
+            new_search_key = str(values.get("network_search_api_key", "")).strip()
+            if new_search_key:
+                network["search_api_key"] = new_search_key
             self._atomic_write(config)
             return deepcopy(config)
 

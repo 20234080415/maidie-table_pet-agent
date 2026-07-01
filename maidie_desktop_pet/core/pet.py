@@ -112,6 +112,9 @@ class PetController(QObject):
                 technical.get("base_url") or ai.get("base_url", "https://api.deepseek.com"),
                 technical.get("model", "deepseek-v4-pro"),
             )
+        for plugin in self._plugins:
+            if hasattr(plugin, "configure"):
+                plugin.configure(config.get("network", {}))
         public = self.config_store.public_settings()
         self.settings_changed.emit(public)
         self._broadcast("on_settings_changed", public)
@@ -243,6 +246,9 @@ class PetController(QObject):
         self.movement.stop()
         self.set_state(PetState.THINKING, BehaviorPriority.AI_TALKING, 400, force=True)
         context = self.memory.get_recent()
+        memory_context = self.memory.prompt_context() if hasattr(self.memory, "prompt_context") else ""
+        if memory_context:
+            context.append({"memory": memory_context})
         future = self._executor.submit(self._run_stream_request, message, context)
         future.add_done_callback(self._finish_request)
 
@@ -297,8 +303,28 @@ class PetController(QObject):
         self._activate_talking(animation, duration)
         self.message_received.emit(response)
         self.memory.save(self._pending_message, response["text"])
+        if (
+            hasattr(self.memory, "save_extracted")
+            and hasattr(self.ai_router, "extract_memories")
+            and (
+                not hasattr(self.memory, "can_extract")
+                or self.memory.can_extract(self._pending_message, response["text"])
+            )
+        ):
+            self._executor.submit(
+                self._extract_and_store_memories,
+                self._pending_message,
+                response["text"],
+            )
         self._broadcast("on_message", response)
         self._pending_reaction = None
+
+    def _extract_and_store_memories(self, message: str, response: str) -> None:
+        try:
+            extracted = self.ai_router.extract_memories(message, response)
+            self.memory.save_extracted(extracted)
+        except Exception:
+            self.logger.exception("Memory extraction failed")
 
     def _activate_talking(self, animation: str, duration: int) -> None:
         if self.action_registry and self.action_registry.get(animation):
