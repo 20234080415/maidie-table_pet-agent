@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 from hashlib import sha256
+from pathlib import Path
+from shutil import which
 from time import monotonic
 from typing import Any, Callable
 
@@ -25,12 +27,14 @@ class ScreenReader:
     def __init__(self, enabled: bool = False, interval_seconds: float = 60.0,
                  screenshot_provider: Callable[[], Any] | None = None,
                  ocr_provider: Callable[[Any], str] | None = None,
+                 tesseract_path: str | None = None,
                  clock: Callable[[], float] = monotonic) -> None:
         self.enabled = enabled
         self.interval_seconds = max(10.0, float(interval_seconds))
         self._screenshot_provider = screenshot_provider or self._grab_screen
         self._ocr_provider = ocr_provider or self._ocr
         self._clock = clock
+        self.tesseract_path = tesseract_path
         self._last_read = float("-inf")
         self._last_hash = ""
         self._last_result = self._empty("not_read")
@@ -70,10 +74,20 @@ class ScreenReader:
         from PIL import ImageGrab
         return ImageGrab.grab(all_screens=True)
 
-    @staticmethod
-    def _ocr(image: Any) -> str:
+    def _ocr(self, image: Any) -> str:
         try:
             import pytesseract
         except ImportError as exc:
             raise RuntimeError("pytesseract is not installed") from exc
-        return pytesseract.image_to_string(image, lang="chi_sim+eng")
+        configured = Path(self.tesseract_path) if self.tesseract_path else None
+        standard = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+        executable = configured if configured and configured.exists() else standard if standard.exists() else None
+        if executable:
+            pytesseract.pytesseract.tesseract_cmd = str(executable)
+        elif not which("tesseract"):
+            raise RuntimeError("Tesseract executable was not found")
+        languages = set(pytesseract.get_languages(config=""))
+        selected = "+".join(language for language in ("chi_sim", "eng") if language in languages)
+        if not selected:
+            raise RuntimeError("No compatible Tesseract language data is installed")
+        return pytesseract.image_to_string(image, lang=selected)
