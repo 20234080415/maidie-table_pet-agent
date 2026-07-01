@@ -1,42 +1,60 @@
 # Maidie Desktop Pet
 
-## Agent Router V2（强制规划与防幻觉）
+## Agent 能力总览
 
-Agent Router V2 固定职责边界为：`Tool = 数据层`、`Planner = 决策层`、`Synthesizer/LLM = 唯一表达层`。
+Maidie 当前采用统一链路：
 
-- 输入先分类为 `DIRECT_TOOL`、`DECISION_TASK` 或 `CHAT`；“适不适合、能不能、是否应该、建议、去不去、要不要”等决策词优先于天气/时间匹配。
-- `DECISION_TASK` 强制进入 Planner，使用 `{goal, steps}` JSON；决策计划至少两步，最后一步为仅基于已有数据表达的 `llm`。
-- WeatherTool、TimeTool 和 Search 只返回 `type/raw/source`，禁止返回面向用户的 `text` 或主观结论；Registry 与 Executor 还会剥离旧工具误带的 `text`。
-- 天气事实必须来自 WeatherTool，时间事实必须来自 TimeTool。必需数据缺失时，在调用 LLM 前阻断并返回“不确定，需要查询。”
-- 最终统一由 Synthesizer 输出 `text/emotion/action/state/source`，工具链回答的 `source` 为 `tool+llm`。
+```text
+User / Proactive
+  → Memory + Desktop/Screen/App Awareness
+  → Intent Detector
+  → Planner
+  → Tool/System Executor
+  → Synthesizer
+  → PyQt UI + Animation
+```
 
-验收测试覆盖：“明天适合跑步吗”、“长沙明天天气怎么样”、“现在几点”、“要不要去健身”，以及必需数据缺失时禁止 LLM 猜测。
+| 版本 | 核心能力 | 关键约束 |
+|---|---|---|
+| V1 | Planner、Tool Chain、SQLite Memory | 决策任务必须规划 |
+| V2 | 鼠标/窗口感知、主动行为、定时与条件任务 | 默认不主动打扰，全局冷却防刷屏 |
+| V3 | 屏幕 OCR、应用理解、半自动系统操作 | 屏幕理解默认关闭，写操作必须确认 |
 
-## Agent V2（桌面感知与主动行为）
+### 路由与防幻觉
 
-Agent V2 使用固定链路：`Desktop Awareness → Proactive/Scheduler → Tools → Synthesizer → PyQt UI`。
+- 输入分类为 `DIRECT_TOOL`、`DECISION_TASK` 或 `CHAT`；决策词优先于天气/时间匹配。
+- Tool 只返回 `type/raw/source` 数据，Planner 不回答用户，最终文本只能由 Synthesizer 输出。
+- 天气和时间必须分别来自 WeatherTool 与 TimeTool；数据缺失时不允许 LLM 猜测。
+- 最终响应始终保持 `text/emotion/action/state/source` 五字段结构。
 
-- `core/awareness/` 根据全局鼠标样本计算速度和空闲时长，并通过 Windows API 只读获取前台窗口标题，分类为 coding、browser、chat、gaming 或 unknown；不会截屏或记录键盘内容。
-- `core/proactive/` 每 30–60 秒观察一次上下文，支持久未活动、长时间编程和低概率陪伴触发；全局冷却默认 15 分钟，防止连续打扰。
-- `core/tasks/` 支持 once、cron 和 condition 三类任务，任务保存在本地 `memory/scheduled_tasks.json`；天气条件只使用 WeatherTool 原始数据判断。
-- 状态机新增 `watching` 与 `reminding`。观察时复用轻微 idle/眨眼反馈；提醒通过原有 SSE、气泡和 happy/shy/sleepy 动作反馈。
-- 主动行为默认关闭，可在“性格与模型设置 → 主动行为”中开启，并设置 30–60 秒观察间隔和最短打扰间隔。
-- 主动内容继续通过现有 Agent Router 与五字段输出协议；Tool 仍只返回数据，缺少必要事实时不允许 LLM 猜测。
+### 桌面感知与主动行为
 
-## Agent V3（屏幕理解与半自动系统操作）
+- 鼠标活动、空闲时长、前台窗口和应用类型组成桌面上下文；剪贴板只检测变化，不读取正文。
+- Proactive Engine 支持久未活动、长时间编程、屏幕场景变化和频繁切换窗口等触发源。
+- 主动行为默认关闭，观察间隔为 30–60 秒，默认冷却 15 分钟。
+- once、cron、condition 任务保存在本地 `memory/scheduled_tasks.json`。
 
-V3 链路为：`User/Proactive → Memory → Screen/App Awareness → Planner → Executor → Synthesizer → UI`。
+### 屏幕理解、权限与隐私
 
-- `core/vision/screen_reader.py` 按可配置间隔截屏，在内存中使用 pytesseract OCR，并输出屏幕文字、应用线索、语义场景与置信度。屏幕理解默认关闭，开启前由设置页明确授权；OCR 在本机完成，但相关文字可能随当前 Agent 任务发送给用户配置的 AI 服务。
-- `core/awareness/app_tracker.py` 读取前台进程名和窗口标题，分类为 coding、browsing、chatting、gaming 或 unknown；剪贴板监听只观察 Windows 序列号变化，不读取内容。
-- `core/tools/system_tools.py` 支持读取/搜索/创建文件、打开白名单应用、打开文件夹、切换窗口、截图和写剪贴板。读取文件、搜索文件和截图按只读能力处理；其余动作必须弹出确认框。
-- `delete_file`、`execute_script` 和 `system_command` 被显式列为危险动作，当前版本即使确认也不会执行。
-- Planner 的 system 步骤包含 `requires_confirmation`，Executor 负责真实执行并将纯数据结果交给 Synthesizer；Tool 不输出用户结论，五字段 AI 响应结构保持不变。
-- 确认请求从后台执行线程回到 PyQt 主线程；默认按钮为“否”，超时自动拒绝，确认框不会展示待写入的文件内容或剪贴板正文。
-- Proactive Engine 新增屏幕场景变化、频繁切换窗口和剪贴板变化触发，并继续受总冷却时间限制。
+- 屏幕 OCR 默认关闭；启用后使用 pytesseract 在本机识别，相关文字可能随当前 Agent 任务发送给用户配置的 AI 服务。
+- 文件读取、文件搜索和不覆盖已有文件的截图按只读能力处理。
+- 创建文件、打开应用/文件夹、切换窗口和写剪贴板必须经过 PyQt 确认框；默认选择“否”，超时自动拒绝。
+- `delete_file`、`execute_script`、`system_command` 当前始终禁止执行。
 
-OCR 需要 Python 包 `pytesseract` 以及 Windows 上安装的 Tesseract OCR 程序；未安装或识别失败时只返回不可用状态，不会阻塞 Maidie 其他功能。
-Maidie 会自动识别 `C:\Program Files\Tesseract-OCR\tesseract.exe`。若只安装了 `eng.traineddata`，英文 OCR 可正常工作；识别中文还需把 `chi_sim.traineddata` 安装到 Tesseract 的 `tessdata` 目录。
+### OCR 安装
+
+Maidie 自动识别 `C:\Program Files\Tesseract-OCR\tesseract.exe`。语言包目录应包含：
+
+```text
+C:\Program Files\Tesseract-OCR\tessdata\eng.traineddata
+C:\Program Files\Tesseract-OCR\tessdata\chi_sim.traineddata
+```
+
+检查命令：
+
+```powershell
+& "C:\Program Files\Tesseract-OCR\tesseract.exe" --list-langs
+```
 
 Maidie 是一个常驻 Windows 桌面的二次元 AI 女仆桌宠。项目使用 Python、PyQt6、
 hatch-pet WebP 动画图集和 DeepSeek/OpenAI 兼容接口，具备透明置顶窗口、自然移动、
@@ -337,21 +355,31 @@ config/config.json
 
 隐私提示：联网时只会向所选第三方搜索服务发送当前用户问题和必要的查询关键词，不会自动上传最近聊天记录。搜索服务可能依据其自身隐私政策记录请求；如不接受，请保持联网开关关闭。搜索 API Key 以明文保存在本地 `config/config.json`，请勿提交到公开仓库。
 
-## Agent 核心系统
+## Agent 执行协议
 
-Maidie 会先判断输入属于普通聊天、单一工具查询，还是需要拆解执行的任务。整体优先级为：
+Planner 生成 JSON 计划，步骤工具限定为 `time|weather|search|system|memory|llm`：
 
-```text
-Tool → Memory → LLM
+```json
+{
+  "goal": "用户目标",
+  "steps": [
+    {
+      "tool": "system",
+      "action": "read_file",
+      "params": {"operation": "read_file", "path": "..."},
+      "requires_confirmation": false
+    },
+    {
+      "tool": "llm",
+      "action": "仅根据已有数据总结",
+      "params": {},
+      "requires_confirmation": false
+    }
+  ]
+}
 ```
 
-- 普通聊天继续使用原有 chat/codex 路由。
-- “现在几点”“天气”等单一查询直接使用确定性工具。
-- “帮我查明天天气适不适合跑步”等组合任务会进入 Agent 流程。
-
-任务流程为：读取长期记忆和最近聊天 → 判断意图 → Planner 生成严格 JSON 步骤 → 按顺序执行 time、weather、search 或 memory 工具 → 将步骤结果交给现有模型综合。Planner 只负责规划，不直接回答；工具也不会自行调用模型。模型不可用、计划格式无效或某一步失败时，会使用受限的本地计划或友好失败结果降级，不会导致桌宠退出。
-
-任务执行期间 Maidie 使用现有 `thinking` 状态；成功后进入 `talking` 并触发开心反馈，失败时播放 `failed` 动画。最终 AI 回复仍保持 `text`、`emotion`、`action`、`state`、`source` 五字段格式。
+Executor 顺序执行工具并收集纯数据结果，Synthesizer 最后统一表达。系统写操作即使由 Planner 标记为无需确认，SystemTool 仍会在执行层强制确认，形成双重安全校验。
 
 ## 记忆系统
 
