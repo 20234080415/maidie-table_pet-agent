@@ -118,6 +118,9 @@ class PetController(QObject):
                 technical.get("base_url") or ai.get("base_url", "https://api.deepseek.com"),
                 technical.get("model", "deepseek-v4-pro"),
             )
+        synthesizer = getattr(self.ai_router, "synthesizer", None)
+        if synthesizer is not None:
+            synthesizer.personality_prompt = personality
         for plugin in self._plugins:
             if hasattr(plugin, "configure"):
                 plugin.configure(config.get("network", {}))

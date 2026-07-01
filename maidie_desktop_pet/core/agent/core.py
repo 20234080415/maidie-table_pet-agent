@@ -54,9 +54,11 @@ class AgentCore:
             "请输出包含 text、emotion、action、state 的 JSON。"
         )
         try:
-            response = client.ask_stream(synthesis_prompt, context, on_delta) if on_delta else client.ask(synthesis_prompt, context)
+            response = self._ask_synthesized(client, synthesis_prompt, context, on_delta)
             result = normalize_response(response, "tool+llm")
             result.update({"action": "talk", "state": "talking", "source": "tool+llm"})
+            if on_delta:
+                on_delta(result["text"])
             return result
         except Exception:
             return self._uncertain(on_delta)
@@ -80,10 +82,11 @@ class AgentCore:
             "请直接解释结果，并输出包含 text、emotion、action、state 的 JSON。"
         )
         try:
-            response = (client.ask_stream(synthesis_prompt, context, on_delta)
-                        if on_delta else client.ask(synthesis_prompt, context))
+            response = self._ask_synthesized(client, synthesis_prompt, context, on_delta)
             result = normalize_response(response, "tool+llm")
             result.update({"action": "talk", "state": "talking", "source": "tool+llm"})
+            if on_delta:
+                on_delta(result["text"])
             return result
         except Exception:
             text = "屏幕感知工具本次没有取得可用结果，请检查 OCR 是否安装并重试。"
@@ -91,6 +94,15 @@ class AgentCore:
             if on_delta:
                 on_delta(text)
             return result
+
+    @staticmethod
+    def _ask_synthesized(client: Any, prompt: str, context: list[dict[str, Any]],
+                         on_delta: Callable[[str], None] | None) -> AIResponse:
+        # Tool synthesis often asks for structured JSON. Buffer its stream so raw
+        # braces/metadata never reach the speech bubble before normalization.
+        if on_delta:
+            return client.ask_stream(prompt, context, lambda _chunk: None)
+        return client.ask(prompt, context)
 
     @staticmethod
     def _requires(message: str, kind: str) -> bool:

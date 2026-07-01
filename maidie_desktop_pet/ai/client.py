@@ -21,6 +21,7 @@ AIResponse = dict[str, str]
 
 
 def normalize_response(result: dict[str, Any], source: str) -> AIResponse:
+    result = _unwrap_nested_response(result)
     default_state = "thinking" if result.get("action") == "thinking" else "talking"
     return {
         "text": str(result.get("text") or "Maidie is here."),
@@ -29,6 +30,29 @@ def normalize_response(result: dict[str, Any], source: str) -> AIResponse:
         "state": str(result.get("state") or default_state),
         "source": source,
     }
+
+
+def _unwrap_nested_response(result: dict[str, Any]) -> dict[str, Any]:
+    """Recover when a model puts its JSON object inside the text field."""
+    value = result.get("text")
+    if not isinstance(value, str):
+        return result
+    candidate = value.strip()
+    if candidate.startswith("```json") and candidate.endswith("```"):
+        candidate = candidate[7:-3].strip()
+    elif candidate.startswith("```") and candidate.endswith("```"):
+        candidate = candidate[3:-3].strip()
+    if not (candidate.startswith("{") and candidate.endswith("}")):
+        return result
+    try:
+        nested = json.loads(candidate)
+    except (TypeError, ValueError):
+        return result
+    if not isinstance(nested, dict) or not isinstance(nested.get("text"), str):
+        return result
+    merged = dict(result)
+    merged.update({key: nested[key] for key in ("text", "emotion", "action", "state") if key in nested})
+    return merged
 
 
 class AIClient(ABC):

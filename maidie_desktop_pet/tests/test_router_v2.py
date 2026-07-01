@@ -81,6 +81,25 @@ class RouterV2AcceptanceTests(unittest.TestCase):
         self.assertEqual(result["text"], "不确定，需要查询。")
         self.assertEqual(self.client.calls, 0)
 
+    def test_tool_stream_emits_only_visible_text(self):
+        class NestedClient(Client):
+            def ask(self, prompt, context):
+                self.calls += 1
+                return normalize_response({
+                    "text": '{"text":"现在是晚上11点51分。","emotion":"温柔",'
+                            '"action":"看怀表","state":"standby"}'
+                }, "chat")
+
+        client = NestedClient()
+        agent = AgentCore(IntentDetector(self.registry), Planner(client),
+                          ToolExecutor(self.registry, Search(), Memory()), Memory())
+        router = AIRouter(client, client, tool_registry=self.registry, agent_core=agent)
+        chunks = []
+        result = router.ask_stream("现在几点", [], chunks.append)
+        self.assertEqual(chunks, ["现在是晚上11点51分。"])
+        self.assertEqual(result["text"], "现在是晚上11点51分。")
+        self.assertNotIn("{", "".join(chunks))
+
 
 if __name__ == "__main__":
     unittest.main()

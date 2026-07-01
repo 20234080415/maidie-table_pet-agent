@@ -2,6 +2,16 @@
 
 ## Agent 能力总览
 
+### Maidie Core Brain V4
+
+生产聊天入口现在统一经过 `core/brain/BrainRouter`：确定性分类器先区分
+`chat/task/screen`，任务由不依赖 LLM 的 Planner 选择数据工具，最后只有
+Synthesizer 可以生成用户可见文本。`core/personality/MaidieStyle` 在最终边界保留
+可爱、轻傲娇的桌宠语气，并过滤 Router、Planner 与工具调用等内部表述。
+
+V4 内置 `time/weather/search/screen/memory` 数据工具。工具只返回结构化事实；
+天气、时间与屏幕内容不能由模型猜测。旧 Agent V1–V3 模块作为兼容层继续保留。
+
 Maidie 当前采用统一链路：
 
 ```text

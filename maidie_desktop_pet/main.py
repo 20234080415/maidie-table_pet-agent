@@ -8,13 +8,14 @@ from pathlib import Path
 from PyQt6.QtWidgets import QApplication
 
 from ai.client import OpenAICompatibleClient
-from ai.router import AIRouter
+from core.brain import BrainRouter, Synthesizer
 from core.pet import PetController
 from core.actions import ActionRegistry
 from core.settings import ConfigStore
 from core.plugins.network import NetworkPlugin
-from core.tools import SystemTool, TimeTool, ToolRegistry, WeatherTool
-from core.agent import AgentCore, ConfirmationBroker, IntentDetector, Planner, ToolExecutor
+from core.tools import (MemoryTool, ScreenTool, SearchTool, SystemTool, TimeTool,
+                        ToolRegistry, WeatherTool)
+from core.agent import ConfirmationBroker
 from core.awareness import AppTracker, ClipboardTracker, IdleDetector, MouseTracker, WindowTracker
 from core.awareness.context import AwarenessContext
 from core.proactive import ProactiveEngine, ProactiveRuntime
@@ -44,7 +45,6 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
     memory = ConversationMemory(ROOT / "memory" / "memories.db")
     confirmation_broker = ConfirmationBroker()
     system_tool = SystemTool(confirmation_callback=confirmation_broker.request)
-    tool_registry = ToolRegistry([TimeTool(), WeatherTool(), system_tool])
     proactive_options = config.get("proactive", {})
     vision_options = config.get("vision", {})
     idle_detector = IdleDetector(float(proactive_options.get("idle_trigger_seconds", 300)))
@@ -55,21 +55,20 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
     awareness = AwarenessContext(
         MouseTracker(idle_detector), WindowTracker(), AppTracker(), screen_reader, ClipboardTracker()
     )
-    agent_core = AgentCore(
-        detector=IntentDetector(tool_registry),
-        planner=Planner(chat_client),
-        executor=ToolExecutor(tool_registry, network_plugin, memory),
-        memory=memory,
-        awareness_provider=awareness,
-    )
-    router = AIRouter(
+    tool_registry = ToolRegistry([
+        TimeTool(), WeatherTool(), SearchTool(network_plugin), ScreenTool(awareness),
+        MemoryTool(memory), system_tool,
+    ])
+    personality_prompt = config_store.personality_prompt(config)
+    router = BrainRouter(
         chat_client=chat_client,
         codex_client=codex_client,
-        network_plugin=network_plugin,
         tool_registry=tool_registry,
-        agent_core=agent_core,
+        memory=memory,
+        synthesizer=Synthesizer(chat_client, codex_client,
+                                personality_prompt=personality_prompt),
     )
-    chat_client.personality_prompt = config_store.personality_prompt(config)
+    chat_client.personality_prompt = personality_prompt
     proactive_engine = ProactiveEngine(
         enabled=bool(proactive_options.get("enabled", False)),
         cooldown_seconds=float(proactive_options.get("cooldown_seconds", 900)),
