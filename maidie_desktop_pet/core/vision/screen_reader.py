@@ -41,7 +41,9 @@ class ScreenReader:
 
     def read(self, force: bool = False) -> dict[str, Any]:
         now = self._clock()
-        if not self.enabled:
+        # A forced read represents an explicit user request. Background reads still
+        # obey the opt-in setting, while direct awareness questions may use OCR.
+        if not self.enabled and not force:
             return self._empty("disabled")
         if not force and now - self._last_read < self.interval_seconds:
             return {**self._last_result, "status": "cached"}

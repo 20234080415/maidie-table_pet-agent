@@ -13,6 +13,7 @@ from ai.prompt import (
     CODEX_SYSTEM_PROMPT,
     MAIDIE_STREAM_PROMPT,
     MAIDIE_SYSTEM_PROMPT,
+    DESKTOP_AGENT_CAPABILITY_PROMPT,
 )
 
 
@@ -230,7 +231,7 @@ class OpenAICompatibleClient(AIClient):
                 json={
                     "model": self.model,
                     "messages": [
-                        {"role": "system", "content": "你是严格的非敏感记忆提取器。"},
+                        {"role": "system", "content": DESKTOP_AGENT_CAPABILITY_PROMPT + "\n你是严格的非敏感记忆提取器。"},
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0,
@@ -272,7 +273,7 @@ class OpenAICompatibleClient(AIClient):
                 json={
                     "model": self.model,
                     "messages": [
-                        {"role": "system", "content": "只生成任务计划 JSON。"},
+                        {"role": "system", "content": DESKTOP_AGENT_CAPABILITY_PROMPT + "\n只生成任务计划 JSON。"},
                         {"role": "user", "content": planner_prompt},
                     ],
                     "temperature": 0,

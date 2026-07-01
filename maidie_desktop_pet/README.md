@@ -22,6 +22,10 @@ User / Proactive
 
 ### 路由与防幻觉
 
+- 屏幕能力问题优先进入 `SCREEN_AWARENESS`，固定执行 `screen_ocr → app_tracker → window_tracker`。
+- 三项结果统一为 `screen_text/app/window/context` 后才交给 Synthesizer；LLM 只解释工具事实。
+- 显式屏幕询问会触发一次强制 OCR；后台屏幕理解仍遵守“默认关闭”的隐私设置。
+- 所有模型输入都会注入桌面 Agent 能力声明，禁止模型绕过 Router 猜测屏幕状态。
 - 输入分类为 `DIRECT_TOOL`、`DECISION_TASK` 或 `CHAT`；决策词优先于天气/时间匹配。
 - Tool 只返回 `type/raw/source` 数据，Planner 不回答用户，最终文本只能由 Synthesizer 输出。
 - 天气和时间必须分别来自 WeatherTool 与 TimeTool；数据缺失时不允许 LLM 猜测。
