@@ -24,16 +24,53 @@ from core.settings import PERSONALITY_PRESETS
 
 
 BASE_STYLE = """
-QDialog { background: #fff8fb; color: #4a2938; }
-QLabel { color: #5b3547; }
-QLineEdit, QTextEdit, QComboBox, QTextBrowser {
-  background: #fffdfd; color: #452735; border: 1px solid #e2a7bf;
-  border-radius: 8px; padding: 6px; selection-background-color: #e7a7c2;
+QDialog, QWidget {
+  background: #f1e4e7;
+  color: #49343d;
 }
-QPushButton { background: #f3c5d7; color: #4a2938; border: none;
-  border-radius: 8px; padding: 7px 14px; }
-QPushButton:hover { background: #ebb1c9; }
-QTabWidget::pane { border: 1px solid #edc3d3; border-radius: 8px; }
+QLabel, QCheckBox { color: #574049; }
+QLineEdit, QTextEdit, QComboBox, QTextBrowser, QSpinBox {
+  background: #f8eef0;
+  color: #3f3036;
+  border: 1px solid #cfaab4;
+  border-radius: 8px;
+  padding: 6px;
+  selection-background-color: #c98fa1;
+  selection-color: #2e2025;
+}
+QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus {
+  background: #faF2f3;
+  border: 1px solid #b9798d;
+}
+QLineEdit:disabled, QTextEdit:disabled, QComboBox:disabled, QSpinBox:disabled {
+  background: #e6d8dc;
+  color: #89747b;
+}
+QPushButton {
+  background: #d9a8b6;
+  color: #3f2d34;
+  border: 1px solid #c38b9c;
+  border-radius: 8px;
+  padding: 7px 14px;
+}
+QPushButton:hover { background: #ce96a7; }
+QPushButton:pressed { background: #bf8497; }
+QTabWidget::pane {
+  background: #eadadd;
+  border: 1px solid #cda6b1;
+  border-radius: 8px;
+  top: -1px;
+}
+QTabBar::tab {
+  background: #dfc9cf;
+  color: #634852;
+  border: 1px solid #cba7b1;
+  padding: 7px 12px;
+  margin-right: 2px;
+  border-top-left-radius: 7px;
+  border-top-right-radius: 7px;
+}
+QTabBar::tab:selected { background: #eadadd; color: #3f2d34; }
 """
 
 
