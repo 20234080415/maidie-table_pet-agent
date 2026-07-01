@@ -19,5 +19,5 @@ class Tool(ABC):
 
     @abstractmethod
     def run(self, query: str) -> ToolResult:
-        """Return type, text, raw and source fields."""
+        """Return structured data (type, raw, source), never user-facing text."""
         raise NotImplementedError

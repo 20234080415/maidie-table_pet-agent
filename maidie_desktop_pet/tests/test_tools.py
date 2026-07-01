@@ -37,7 +37,7 @@ class ToolSystemTests(unittest.TestCase):
         result = tool.run("现在几点？")
         self.assertEqual(result["type"], "time")
         self.assertEqual(result["source"], "local")
-        self.assertIn("现在时间是：", result["text"])
+        self.assertNotIn("text", result)
         self.assertIn("iso", result["raw"])
 
     @patch("core.tools.weather_tool.requests.get")
@@ -55,8 +55,9 @@ class ToolSystemTests(unittest.TestCase):
         result = WeatherTool().run("长沙天气")
         self.assertEqual(result["type"], "weather")
         self.assertEqual(result["source"], "api")
-        self.assertIn("29.5°C", result["text"])
-        self.assertIn("8.2 km/h", result["text"])
+        self.assertNotIn("text", result)
+        self.assertEqual(result["raw"]["temperature"], 29.5)
+        self.assertEqual(result["raw"]["wind"], 8.2)
         self.assertEqual(get.call_args.kwargs["timeout"], 5)
 
     def test_registry_match(self):
@@ -76,7 +77,7 @@ class ToolSystemTests(unittest.TestCase):
             tool_registry=ToolRegistry([TimeTool(), WeatherTool()]),
         )
         result = router.ask("现在几点？请查一下", [])
-        self.assertEqual(result["source"], "tool")
+        self.assertEqual(result["source"], "tool+llm")
         self.assertEqual(client.calls, 0)
         self.assertEqual(search.calls, 0)
         self.assertEqual(

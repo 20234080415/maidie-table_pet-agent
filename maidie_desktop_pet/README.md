@@ -1,5 +1,17 @@
 # Maidie Desktop Pet
 
+## Agent Router V2（强制规划与防幻觉）
+
+Agent Router V2 固定职责边界为：`Tool = 数据层`、`Planner = 决策层`、`Synthesizer/LLM = 唯一表达层`。
+
+- 输入先分类为 `DIRECT_TOOL`、`DECISION_TASK` 或 `CHAT`；“适不适合、能不能、是否应该、建议、去不去、要不要”等决策词优先于天气/时间匹配。
+- `DECISION_TASK` 强制进入 Planner，使用 `{goal, steps}` JSON；决策计划至少两步，最后一步为仅基于已有数据表达的 `llm`。
+- WeatherTool、TimeTool 和 Search 只返回 `type/raw/source`，禁止返回面向用户的 `text` 或主观结论；Registry 与 Executor 还会剥离旧工具误带的 `text`。
+- 天气事实必须来自 WeatherTool，时间事实必须来自 TimeTool。必需数据缺失时，在调用 LLM 前阻断并返回“不确定，需要查询。”
+- 最终统一由 Synthesizer 输出 `text/emotion/action/state/source`，工具链回答的 `source` 为 `tool+llm`。
+
+验收测试覆盖：“明天适合跑步吗”、“长沙明天天气怎么样”、“现在几点”、“要不要去健身”，以及必需数据缺失时禁止 LLM 猜测。
+
 Maidie 是一个常驻 Windows 桌面的二次元 AI 女仆桌宠。项目使用 Python、PyQt6、
 hatch-pet WebP 动画图集和 DeepSeek/OpenAI 兼容接口，具备透明置顶窗口、自然移动、
 鼠标互动、流式聊天、技术问题路由、最近聊天、人格设置和可扩展动作系统。
@@ -298,6 +310,22 @@ config/config.json
 开启后，包含“查一下”“搜索”“联网看看”“最新”“天气”“现在几点”或“官方文档”等意图的问题会先取得搜索摘要，再交给现有 AI 生成自然回答。网络超时、服务异常、没有 Key 或没有结果时，Maidie 会给出友好提示，不会退出程序。
 
 隐私提示：联网时只会向所选第三方搜索服务发送当前用户问题和必要的查询关键词，不会自动上传最近聊天记录。搜索服务可能依据其自身隐私政策记录请求；如不接受，请保持联网开关关闭。搜索 API Key 以明文保存在本地 `config/config.json`，请勿提交到公开仓库。
+
+## Agent 核心系统
+
+Maidie 会先判断输入属于普通聊天、单一工具查询，还是需要拆解执行的任务。整体优先级为：
+
+```text
+Tool → Memory → LLM
+```
+
+- 普通聊天继续使用原有 chat/codex 路由。
+- “现在几点”“天气”等单一查询直接使用确定性工具。
+- “帮我查明天天气适不适合跑步”等组合任务会进入 Agent 流程。
+
+任务流程为：读取长期记忆和最近聊天 → 判断意图 → Planner 生成严格 JSON 步骤 → 按顺序执行 time、weather、search 或 memory 工具 → 将步骤结果交给现有模型综合。Planner 只负责规划，不直接回答；工具也不会自行调用模型。模型不可用、计划格式无效或某一步失败时，会使用受限的本地计划或友好失败结果降级，不会导致桌宠退出。
+
+任务执行期间 Maidie 使用现有 `thinking` 状态；成功后进入 `talking` 并触发开心反馈，失败时播放 `failed` 动画。最终 AI 回复仍保持 `text`、`emotion`、`action`、`state`、`source` 五字段格式。
 
 ## 记忆系统
 

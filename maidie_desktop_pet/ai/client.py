@@ -48,6 +48,9 @@ class AIClient(ABC):
     def extract_memories(self, message: str, response: str) -> dict[str, list[Any]]:
         return {"facts": [], "preferences": []}
 
+    def plan_task(self, message: str, memory_context: str) -> dict[str, Any] | None:
+        return None
+
 
 class OpenAICompatibleClient(AIClient):
     """Reusable OpenAI-compatible backend for chat or Codex-style reasoning."""
@@ -245,6 +248,44 @@ class OpenAICompatibleClient(AIClient):
             }
         except Exception:
             return {"facts": [], "preferences": []}
+
+    def plan_task(self, message: str, memory_context: str) -> dict[str, Any] | None:
+        """Ask the configured model for a strict tool plan; never answer the task here."""
+        if not self.api_key or self.api_key == "YOUR_API_KEY_HERE":
+            return None
+        planner_prompt = (
+            "你是 Maidie 的任务规划器，只能输出 JSON，不能回答用户。"
+            "格式：{\"goal\":\"...\",\"steps\":[{\"tool\":"
+            "\"time|weather|search|memory|llm\",\"action\":\"...\","
+            "\"params\":{}}]}。至少一个步骤；显式选择工具；llm 只能用于最终总结。"
+            "时间必须用 time，天气必须用 weather，需要外部资料才用 search。\n"
+            f"用户背景：{memory_context or '无'}\n用户任务：{message}"
+        )
+        try:
+            response = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": "只生成任务计划 JSON。"},
+                        {"role": "user", "content": planner_prompt},
+                    ],
+                    "temperature": 0,
+                    "response_format": {"type": "json_object"},
+                    "max_tokens": 1000,
+                },
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            content = response.json()["choices"][0]["message"]["content"]
+            result = json.loads(content)
+            return result if isinstance(result, dict) else None
+        except Exception:
+            return None
 
     def reconfigure(
         self,

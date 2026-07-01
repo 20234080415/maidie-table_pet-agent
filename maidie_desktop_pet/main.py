@@ -14,6 +14,7 @@ from core.actions import ActionRegistry
 from core.settings import ConfigStore
 from core.plugins.network import NetworkPlugin
 from core.tools import TimeTool, ToolRegistry, WeatherTool
+from core.agent import AgentCore, IntentDetector, Planner, ToolExecutor
 from input.manager import InputManager
 from memory.memory import ConversationMemory
 from ui.window import PetWindow
@@ -36,14 +37,21 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
     )
     network_plugin = NetworkPlugin(config.get("network", {}))
     tool_registry = ToolRegistry([TimeTool(), WeatherTool()])
+    memory = ConversationMemory(ROOT / "memory" / "memories.db")
+    agent_core = AgentCore(
+        detector=IntentDetector(tool_registry),
+        planner=Planner(chat_client),
+        executor=ToolExecutor(tool_registry, network_plugin, memory),
+        memory=memory,
+    )
     router = AIRouter(
         chat_client=chat_client,
         codex_client=codex_client,
         network_plugin=network_plugin,
         tool_registry=tool_registry,
+        agent_core=agent_core,
     )
     chat_client.personality_prompt = config_store.personality_prompt(config)
-    memory = ConversationMemory(ROOT / "memory" / "memories.db")
 
     movement_options = dict(config.get("movement", {}))
     cursor_chase = bool(movement_options.pop("cursor_chase", False))

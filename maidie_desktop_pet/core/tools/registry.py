@@ -6,13 +6,14 @@ from core.tools.base import Tool, ToolResult
 
 
 class ToolRegistry:
-    """Ordered tool matcher. The first matching tool wins."""
-
     def __init__(self, tools: Iterable[Tool] | None = None) -> None:
-        self.tools: list[Tool] = list(tools or [])
+        self.tools = list(tools or [])
 
     def register(self, tool: Tool) -> None:
         self.tools.append(tool)
+
+    def get(self, name: str) -> Tool | None:
+        return next((tool for tool in self.tools if tool.name == name), None)
 
     def match(self, query: str) -> Tool | None:
         for tool in self.tools:
@@ -29,14 +30,10 @@ class ToolRegistry:
             return None
         try:
             result = tool.run(query)
-            required = {"type", "text", "raw", "source"}
-            if not isinstance(result, dict) or not required.issubset(result):
-                raise ValueError(f"{tool.name} returned an invalid result")
+            if not isinstance(result, dict) or not {"type", "raw", "source"}.issubset(result):
+                raise ValueError(f"{tool.name} returned an invalid data result")
+            # Defense in depth: user-facing prose is forbidden in the data layer.
+            result.pop("text", None)
             return result
         except Exception as exc:
-            return {
-                "type": tool.name,
-                "text": "工具暂时不可用，正在尝试其他方式。",
-                "raw": {"error": str(exc), "tool": tool.name},
-                "source": "local",
-            }
+            return {"type": tool.name, "raw": {"error": str(exc), "tool": tool.name}, "source": "local"}

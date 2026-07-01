@@ -51,9 +51,9 @@ class NetworkPluginTests(unittest.TestCase):
         plugin = NetworkPlugin({"enabled": True}, search)
         router = AIRouter(StubClient(), StubClient(), plugin)
         result = router.ask("联网看看天气", [])
-        self.assertEqual(result["source"], "search")
+        self.assertEqual(result["source"], "tool+llm")
         self.assertEqual(result["emotion"], "sad")
-        self.assertIn("联网查询暂时不可用", result["text"])
+        self.assertEqual(result["text"], "不确定，需要查询。")
 
     def test_network_ai_response_keeps_five_field_contract(self):
         search = StubSearch({
@@ -64,7 +64,7 @@ class NetworkPluginTests(unittest.TestCase):
         router = AIRouter(StubClient(), StubClient(), plugin)
         result = router.ask("查一下天气", [])
         self.assertEqual(set(result), {"text", "emotion", "action", "state", "source"})
-        self.assertEqual(result["source"], "search")
+        self.assertEqual(result["source"], "tool+llm")
 
 
 if __name__ == "__main__":
