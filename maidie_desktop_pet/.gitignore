@@ -3,3 +3,6 @@ __pycache__/
 .venv/
 logs/
 memory/conversations.json
+build/
+dist/
+*.spec.bak

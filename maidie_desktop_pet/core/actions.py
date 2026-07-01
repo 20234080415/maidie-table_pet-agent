@@ -64,6 +64,12 @@ class ActionRegistry:
                     return definition.name
         return None
 
+    def match_gesture(self, gesture: str) -> str | None:
+        for definition in self._definitions.values():
+            if definition.gesture == gesture:
+                return definition.name
+        return None
+
     def public_definitions(self) -> dict[str, dict[str, Any]]:
         return {
             name: {

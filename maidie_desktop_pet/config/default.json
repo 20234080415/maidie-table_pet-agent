@@ -1,0 +1,35 @@
+{
+  "ai": {
+    "provider": "deepseek",
+    "api_key": "",
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-v4-flash",
+    "timeout": 30
+  },
+  "codex": {
+    "api_key": "",
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-v4-pro",
+    "timeout": 90
+  },
+  "personality": {
+    "preset": "gentle_tsundere",
+    "custom_prompt": ""
+  },
+  "movement": {
+    "walk_speed": 70,
+    "run_speed": 175,
+    "walk_threshold": 4,
+    "run_threshold": 105,
+    "acceleration": 360,
+    "cursor_chase": false
+  },
+  "window": {
+    "width": 160,
+    "height": 190,
+    "minimum_width": 36,
+    "minimum_height": 43,
+    "always_on_top": true,
+    "opacity": 1.0
+  }
+}

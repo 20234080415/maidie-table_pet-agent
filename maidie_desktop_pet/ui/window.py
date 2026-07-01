@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import QPoint, QRect, Qt, QTimer
 from PyQt6.QtGui import QCursor, QKeyEvent, QMouseEvent, QResizeEvent, QWheelEvent
-from PyQt6.QtWidgets import QMenu, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QMenu, QVBoxLayout, QWidget
 
 from input.resize import EdgeResizeController
 from input.gesture import PetGestureRecognizer
@@ -31,6 +31,8 @@ class PetWindow(QWidget):
         self._gesture = PetGestureRecognizer()
         self._gesture_consumed = False
         self._dialog = None
+        self._tray_available = False
+        self._allow_quit = False
 
         flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
         if options.get("always_on_top", True):
@@ -133,7 +135,7 @@ class PetWindow(QWidget):
             menu.addAction("恢复默认大小", lambda: self.resize(320, 380))
             menu.addAction("清除记忆", self.controller.clear_memory)
             menu.addSeparator()
-            menu.addAction("退出 Maidie", self.close)
+            menu.addAction("退出 Maidie", self.request_quit)
             menu.exec(global_pos)
 
     def show_recent_chats(self) -> None:
@@ -331,7 +333,31 @@ class PetWindow(QWidget):
         self.chat_input.setGeometry(chosen)
 
     def closeEvent(self, event) -> None:
+        if self._tray_available and not self._allow_quit:
+            self.hide_to_tray()
+            event.ignore()
+            return
         self.bubble.close()
         self.chat_input.close()
         self.controller.shutdown()
         super().closeEvent(event)
+
+    def set_tray_available(self, available: bool) -> None:
+        self._tray_available = available
+
+    def show_from_tray(self) -> None:
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def hide_to_tray(self) -> None:
+        self.bubble.hide()
+        self.chat_input.hide()
+        self.hide()
+
+    def request_quit(self) -> None:
+        self._allow_quit = True
+        self.close()
+        app = QApplication.instance()
+        if app:
+            app.quit()
