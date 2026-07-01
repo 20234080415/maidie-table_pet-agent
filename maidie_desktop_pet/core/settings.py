@@ -23,6 +23,15 @@ NETWORK_DEFAULTS = {
     "search_api_key": "",
 }
 
+PROACTIVE_DEFAULTS = {
+    "enabled": False,
+    "tick_seconds": 45,
+    "cooldown_seconds": 900,
+    "idle_trigger_seconds": 300,
+    "coding_trigger_seconds": 7200,
+    "random_chance": 0.05,
+}
+
 
 class ConfigStore:
     """Thread-safe JSON settings with atomic replacement and secret-safe views."""
@@ -37,6 +46,9 @@ class ConfigStore:
             network = config.setdefault("network", {})
             for key, value in NETWORK_DEFAULTS.items():
                 network.setdefault(key, value)
+            proactive = config.setdefault("proactive", {})
+            for key, value in PROACTIVE_DEFAULTS.items():
+                proactive.setdefault(key, value)
             return config
 
     def public_settings(self) -> dict[str, Any]:
@@ -45,6 +57,7 @@ class ConfigStore:
         technical = config.get("codex", {})
         personality = config.get("personality", {})
         network = config.get("network", {})
+        proactive = config.get("proactive", {})
         key = str(ai.get("api_key", ""))
         return {
             "provider": ai.get("provider", "deepseek"),
@@ -59,6 +72,9 @@ class ConfigStore:
             "network_show_sources": bool(network.get("show_sources", True)),
             "network_search_provider": str(network.get("search_provider", "tavily")),
             "has_network_api_key": bool(network.get("search_api_key", "")),
+            "proactive_enabled": bool(proactive.get("enabled", False)),
+            "proactive_tick_seconds": int(proactive.get("tick_seconds", 45)),
+            "proactive_cooldown_seconds": int(proactive.get("cooldown_seconds", 900)),
         }
 
     def update_user_settings(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -68,6 +84,7 @@ class ConfigStore:
             technical = config.setdefault("codex", {})
             personality = config.setdefault("personality", {})
             network = config.setdefault("network", {})
+            proactive = config.setdefault("proactive", {})
             ai["provider"] = str(values.get("provider", ai.get("provider", "deepseek")))
             ai["base_url"] = str(values.get("base_url", ai.get("base_url", ""))).rstrip("/")
             ai["model"] = str(values.get("chat_model", ai.get("model", "")))
@@ -86,6 +103,9 @@ class ConfigStore:
             new_search_key = str(values.get("network_search_api_key", "")).strip()
             if new_search_key:
                 network["search_api_key"] = new_search_key
+            proactive["enabled"] = bool(values.get("proactive_enabled", proactive.get("enabled", False)))
+            proactive["tick_seconds"] = max(30, min(60, int(values.get("proactive_tick_seconds", proactive.get("tick_seconds", 45)))))
+            proactive["cooldown_seconds"] = max(30, int(values.get("proactive_cooldown_seconds", proactive.get("cooldown_seconds", 900))))
             self._atomic_write(config)
             return deepcopy(config)
 

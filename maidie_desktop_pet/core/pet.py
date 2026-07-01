@@ -37,6 +37,8 @@ class PetController(QObject):
         movement_options: dict[str, Any] | None = None,
         config_store: Any | None = None,
         action_registry: Any | None = None,
+        proactive_runtime: Any | None = None,
+        proactive_tick_seconds: int = 45,
     ) -> None:
         super().__init__()
         self.ai_router = ai_router
@@ -44,6 +46,7 @@ class PetController(QObject):
         self.logger = logger or logging.getLogger(__name__)
         self.config_store = config_store
         self.action_registry = action_registry
+        self.proactive_runtime = proactive_runtime
         self.state_machine = StateMachine()
         self.movement = MovementController(**(movement_options or {}))
         self.behavior = AutonomousBehaviorController()
@@ -61,6 +64,9 @@ class PetController(QObject):
         self._stream_delta_ready.connect(self._handle_stream_delta)
         self._last_tick = monotonic()
         self._state_token = 0
+        self._proactive_timer = QTimer(self)
+        self._proactive_timer.timeout.connect(self._proactive_tick)
+        self._proactive_timer.start(max(30, min(60, int(proactive_tick_seconds))) * 1000)
 
         self._tick_timer = QTimer(self)
         self._tick_timer.timeout.connect(self._tick)
@@ -115,6 +121,13 @@ class PetController(QObject):
         for plugin in self._plugins:
             if hasattr(plugin, "configure"):
                 plugin.configure(config.get("network", {}))
+        if self.proactive_runtime:
+            proactive = config.get("proactive", {})
+            engine = self.proactive_runtime.engine
+            engine.enabled = bool(proactive.get("enabled", False))
+            engine.cooldown_seconds = max(30.0, float(proactive.get("cooldown_seconds", 900)))
+            tick_seconds = max(30, min(60, int(proactive.get("tick_seconds", 45))))
+            self._proactive_timer.setInterval(tick_seconds * 1000)
         public = self.config_store.public_settings()
         self.settings_changed.emit(public)
         self._broadcast("on_settings_changed", public)
@@ -232,7 +245,7 @@ class PetController(QObject):
                 animation="waiting",
             )
 
-    def submit_text(self, message: str) -> None:
+    def submit_text(self, message: str, proactive: bool = False) -> None:
         message = message.strip()
         if not message or self._busy:
             return
@@ -244,7 +257,10 @@ class PetController(QObject):
         )
         self.stream_started.emit({"source": self._pending_source})
         self.movement.stop()
-        self.set_state(PetState.THINKING, BehaviorPriority.AI_TALKING, 400, force=True)
+        target_state = PetState.REMINDING if proactive else PetState.THINKING
+        target_priority = BehaviorPriority.PROACTIVE if proactive else BehaviorPriority.AI_TALKING
+        self.set_state(target_state, target_priority, 400, force=True,
+                       animation="happy" if proactive else None)
         context = self.memory.get_recent()
         memory_context = self.memory.prompt_context() if hasattr(self.memory, "prompt_context") else ""
         if memory_context:
@@ -358,6 +374,8 @@ class PetController(QObject):
         self.set_state(motion_state, priority, force=True)
 
     def on_cursor_moved(self, x: int, y: int) -> None:
+        if self.proactive_runtime:
+            self.proactive_runtime.awareness.mouse_tracker.record(x, y)
         self.cursor = Vec2(float(x), float(y))
         center = Vec2(
             self.movement.position.x + self.movement.window_width / 2,
@@ -432,6 +450,26 @@ class PetController(QObject):
             priority = BehaviorPriority.AUTONOMOUS if motion_state != PetState.IDLE else BehaviorPriority.IDLE
             self.set_state(motion_state, priority)
 
+    def _proactive_tick(self) -> None:
+        if not self.proactive_runtime or self._busy:
+            return
+        try:
+            context, decision = self.proactive_runtime.tick()
+            if decision:
+                self.submit_text(decision.prompt, proactive=True)
+                self._pending_reaction = decision.action
+            elif self.proactive_runtime.engine.enabled and context.get("mouse_state") != "idle":
+                changed = self.set_state(PetState.WATCHING, BehaviorPriority.AUTONOMOUS,
+                                         900, animation="idle")
+                if changed:
+                    token = self._state_token
+                    QTimer.singleShot(950, lambda: self._recover_if_current(token))
+            elif float(context.get("idle_time", 0)) >= 300:
+                self._play_action("sleepy")
+        except Exception:
+            self.logger.exception("Proactive Agent tick failed")
+
     def shutdown(self) -> None:
         self._tick_timer.stop()
+        self._proactive_timer.stop()
         self._executor.shutdown(wait=False, cancel_futures=True)

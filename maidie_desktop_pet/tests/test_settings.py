@@ -47,6 +47,13 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertEqual(saved["network"]["timeout"], 10)
         self.assertNotIn("network_search_api_key", self.store.public_settings())
 
+    def test_proactive_behavior_is_disabled_by_default(self):
+        saved = self.store.load()
+        public = self.store.public_settings()
+        self.assertFalse(saved["proactive"]["enabled"])
+        self.assertFalse(public["proactive_enabled"])
+        self.assertEqual(public["proactive_tick_seconds"], 45)
+
 
 if __name__ == "__main__":
     unittest.main()

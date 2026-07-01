@@ -89,6 +89,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._build_personality_tab(), "性格")
         tabs.addTab(self._build_model_tab(), "模型与 API")
         tabs.addTab(self._build_network_tab(), "联网查询")
+        tabs.addTab(self._build_proactive_tab(), "主动行为")
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
@@ -187,6 +188,27 @@ class SettingsDialog(QDialog):
         layout.addRow("", note)
         return page
 
+    def _build_proactive_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QFormLayout(page)
+        self.proactive_enabled = QCheckBox("允许 Maidie 根据桌面状态主动提醒")
+        self.proactive_enabled.setChecked(self.settings.get("proactive_enabled", False))
+        self.proactive_tick = QSpinBox()
+        self.proactive_tick.setRange(30, 60)
+        self.proactive_tick.setSuffix(" 秒")
+        self.proactive_tick.setValue(self.settings.get("proactive_tick_seconds", 45))
+        self.proactive_cooldown = QSpinBox()
+        self.proactive_cooldown.setRange(1, 240)
+        self.proactive_cooldown.setSuffix(" 分钟")
+        self.proactive_cooldown.setValue(max(1, self.settings.get("proactive_cooldown_seconds", 900) // 60))
+        note = QLabel("默认关闭。仅读取鼠标活动和前台窗口标题，不截屏、不记录键盘内容；节流期间不会重复打扰。")
+        note.setWordWrap(True)
+        layout.addRow("主动开关", self.proactive_enabled)
+        layout.addRow("观察间隔", self.proactive_tick)
+        layout.addRow("最短打扰间隔", self.proactive_cooldown)
+        layout.addRow("", note)
+        return page
+
     def _save(self) -> None:
         values = {
             "provider": self.provider.currentData(),
@@ -201,6 +223,9 @@ class SettingsDialog(QDialog):
             "network_show_sources": self.network_show_sources.isChecked(),
             "network_search_provider": self.network_provider.currentData(),
             "network_search_api_key": self.network_api_key.text().strip(),
+            "proactive_enabled": self.proactive_enabled.isChecked(),
+            "proactive_tick_seconds": self.proactive_tick.value(),
+            "proactive_cooldown_seconds": self.proactive_cooldown.value() * 60,
         }
         if not values["base_url"] or not values["chat_model"] or not values["technical_model"]:
             return

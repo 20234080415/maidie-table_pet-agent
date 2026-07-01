@@ -15,6 +15,10 @@ from core.settings import ConfigStore
 from core.plugins.network import NetworkPlugin
 from core.tools import TimeTool, ToolRegistry, WeatherTool
 from core.agent import AgentCore, IntentDetector, Planner, ToolExecutor
+from core.awareness import IdleDetector, MouseTracker, WindowTracker
+from core.awareness.context import AwarenessContext
+from core.proactive import ProactiveEngine, ProactiveRuntime
+from core.tasks import TaskScheduler
 from input.manager import InputManager
 from memory.memory import ConversationMemory
 from ui.window import PetWindow
@@ -52,6 +56,18 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
         agent_core=agent_core,
     )
     chat_client.personality_prompt = config_store.personality_prompt(config)
+    proactive_options = config.get("proactive", {})
+    idle_detector = IdleDetector(float(proactive_options.get("idle_trigger_seconds", 300)))
+    awareness = AwarenessContext(MouseTracker(idle_detector), WindowTracker())
+    proactive_engine = ProactiveEngine(
+        enabled=bool(proactive_options.get("enabled", False)),
+        cooldown_seconds=float(proactive_options.get("cooldown_seconds", 900)),
+        idle_trigger_seconds=float(proactive_options.get("idle_trigger_seconds", 300)),
+        coding_trigger_seconds=float(proactive_options.get("coding_trigger_seconds", 7200)),
+        random_chance=float(proactive_options.get("random_chance", 0.05)),
+    )
+    scheduler = TaskScheduler(ROOT / "memory" / "scheduled_tasks.json")
+    proactive_runtime = ProactiveRuntime(awareness, proactive_engine, scheduler, tool_registry, memory)
 
     movement_options = dict(config.get("movement", {}))
     cursor_chase = bool(movement_options.pop("cursor_chase", False))
@@ -62,6 +78,8 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
         movement_options=movement_options,
         config_store=config_store,
         action_registry=ActionRegistry(ROOT / "assets" / "actions" / "actions.json"),
+        proactive_runtime=proactive_runtime,
+        proactive_tick_seconds=int(proactive_options.get("tick_seconds", 45)),
     )
     controller.cursor_chase = cursor_chase
     controller.register_plugin(network_plugin)
