@@ -256,9 +256,10 @@ class OpenAICompatibleClient(AIClient):
         planner_prompt = (
             "你是 Maidie 的任务规划器，只能输出 JSON，不能回答用户。"
             "格式：{\"goal\":\"...\",\"steps\":[{\"tool\":"
-            "\"time|weather|search|memory|llm\",\"action\":\"...\","
-            "\"params\":{}}]}。至少一个步骤；显式选择工具；llm 只能用于最终总结。"
+            "\"time|weather|search|system|memory|llm\",\"action\":\"...\","
+            "\"params\":{},\"requires_confirmation\":false}]}。至少一个步骤；显式选择工具；llm 只能用于最终总结。"
             "时间必须用 time，天气必须用 weather，需要外部资料才用 search。\n"
+            "文件或应用操作必须用 system，并在 params.operation 指定动作；非只读操作 requires_confirmation 必须为 true。\n"
             f"用户背景：{memory_context or '无'}\n用户任务：{message}"
         )
         try:

@@ -39,7 +39,12 @@ class ProactiveEngine:
         else:
             self._coding_since = None
         long_coding = self._coding_since is not None and now - self._coding_since >= self.coding_trigger_seconds
-        return float(context.get("idle_time", 0)) >= self.idle_trigger_seconds or long_coding or self._random() < self.random_chance
+        screen_changed = bool(context.get("screen", {}).get("changed"))
+        frequent_switching = int(context.get("switch_count", 0)) >= 5
+        clipboard_changed = bool(context.get("clipboard_changed", False))
+        return (float(context.get("idle_time", 0)) >= self.idle_trigger_seconds or long_coding
+                or screen_changed or frequent_switching or clipboard_changed
+                or self._random() < self.random_chance)
 
     def decide(self, context: dict[str, Any], memory: Any = None) -> ProactiveDecision | None:
         if not self.should_trigger(context):
@@ -50,6 +55,13 @@ class ProactiveEngine:
             return ProactiveDecision("care", "用户已经较长时间没有操作电脑。请温和提醒休息或活动一下，不要声称用户一定疲劳。", "sleepy", ("time",))
         if context.get("window_state") == "coding":
             return ProactiveDecision("care", "用户持续进行编程工作。请给一句简短、不打断思路的休息提醒。", "shy", ("time",))
+        screen = context.get("screen", {})
+        if screen.get("changed") and screen.get("context") == "coding":
+            return ProactiveDecision("screen_help", "屏幕上下文显示用户正在编程。请简短询问是否需要整理或解释代码，不要复述屏幕隐私内容。", "shy")
+        if context.get("clipboard_changed"):
+            return ProactiveDecision("clipboard_help", "检测到剪贴板发生变化，但没有读取内容。请简短询问是否需要处理刚复制的内容。", "shy")
+        if int(context.get("switch_count", 0)) >= 5:
+            return ProactiveDecision("app_help", "用户近期频繁切换窗口。请轻声询问是否需要帮忙查找或整理资料。", "shy")
         return ProactiveDecision("emotion", "结合当前上下文给一句简短陪伴，不要推测用户情绪或事实。", "shy")
 
     def mark_triggered(self) -> None:

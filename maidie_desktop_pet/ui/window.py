@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import QPoint, QRect, Qt, QTimer
 from PyQt6.QtGui import QCursor, QKeyEvent, QMouseEvent, QResizeEvent, QWheelEvent
-from PyQt6.QtWidgets import QMenu, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QMenu, QMessageBox, QVBoxLayout, QWidget
 
 from input.resize import EdgeResizeController
 from input.gesture import PetGestureRecognizer
@@ -18,7 +18,8 @@ from ui.sprite import HatchPetSprite
 class PetWindow(QWidget):
     """Presentation-only window: renders controller signals and forwards input."""
 
-    def __init__(self, controller, assets_dir: Path, options: dict | None = None):
+    def __init__(self, controller, assets_dir: Path, options: dict | None = None,
+                 confirmation_broker=None):
         super().__init__()
         options = options or {}
         self.controller = controller
@@ -31,6 +32,9 @@ class PetWindow(QWidget):
         self._gesture = PetGestureRecognizer()
         self._gesture_consumed = False
         self._dialog = None
+        self.confirmation_broker = confirmation_broker
+        if confirmation_broker:
+            confirmation_broker.requested.connect(self._confirm_system_action)
 
         flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
         if options.get("always_on_top", True):
@@ -68,6 +72,21 @@ class PetWindow(QWidget):
         self._move_to_bottom_right()
         self._position_overlays()
         self.resize_handle.raise_()
+
+    def _confirm_system_action(self, request: dict) -> None:
+        action = str(request.get("action", "system action"))
+        params = request.get("params", {})
+        safe_params = {key: value for key, value in params.items() if key not in {"content", "text"}}
+        answer = QMessageBox.question(
+            self,
+            "Maidie 请求系统权限",
+            f"是否允许执行：{action}\n参数：{safe_params}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        self.confirmation_broker.resolve(
+            str(request.get("id", "")), answer == QMessageBox.StandardButton.Yes
+        )
 
     def global_rect(self):
         return self.frameGeometry()

@@ -32,6 +32,8 @@ PROACTIVE_DEFAULTS = {
     "random_chance": 0.05,
 }
 
+VISION_DEFAULTS = {"enabled": False, "interval_seconds": 60}
+
 
 class ConfigStore:
     """Thread-safe JSON settings with atomic replacement and secret-safe views."""
@@ -49,6 +51,9 @@ class ConfigStore:
             proactive = config.setdefault("proactive", {})
             for key, value in PROACTIVE_DEFAULTS.items():
                 proactive.setdefault(key, value)
+            vision = config.setdefault("vision", {})
+            for key, value in VISION_DEFAULTS.items():
+                vision.setdefault(key, value)
             return config
 
     def public_settings(self) -> dict[str, Any]:
@@ -58,6 +63,7 @@ class ConfigStore:
         personality = config.get("personality", {})
         network = config.get("network", {})
         proactive = config.get("proactive", {})
+        vision = config.get("vision", {})
         key = str(ai.get("api_key", ""))
         return {
             "provider": ai.get("provider", "deepseek"),
@@ -75,6 +81,8 @@ class ConfigStore:
             "proactive_enabled": bool(proactive.get("enabled", False)),
             "proactive_tick_seconds": int(proactive.get("tick_seconds", 45)),
             "proactive_cooldown_seconds": int(proactive.get("cooldown_seconds", 900)),
+            "screen_awareness_enabled": bool(vision.get("enabled", False)),
+            "screen_awareness_interval": int(vision.get("interval_seconds", 60)),
         }
 
     def update_user_settings(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -85,6 +93,7 @@ class ConfigStore:
             personality = config.setdefault("personality", {})
             network = config.setdefault("network", {})
             proactive = config.setdefault("proactive", {})
+            vision = config.setdefault("vision", {})
             ai["provider"] = str(values.get("provider", ai.get("provider", "deepseek")))
             ai["base_url"] = str(values.get("base_url", ai.get("base_url", ""))).rstrip("/")
             ai["model"] = str(values.get("chat_model", ai.get("model", "")))
@@ -106,6 +115,8 @@ class ConfigStore:
             proactive["enabled"] = bool(values.get("proactive_enabled", proactive.get("enabled", False)))
             proactive["tick_seconds"] = max(30, min(60, int(values.get("proactive_tick_seconds", proactive.get("tick_seconds", 45)))))
             proactive["cooldown_seconds"] = max(30, int(values.get("proactive_cooldown_seconds", proactive.get("cooldown_seconds", 900))))
+            vision["enabled"] = bool(values.get("screen_awareness_enabled", vision.get("enabled", False)))
+            vision["interval_seconds"] = max(30, min(600, int(values.get("screen_awareness_interval", vision.get("interval_seconds", 60)))))
             self._atomic_write(config)
             return deepcopy(config)
 

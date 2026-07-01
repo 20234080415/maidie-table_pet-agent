@@ -25,6 +25,7 @@ class IntentDetector:
         re.IGNORECASE,
     )
     MULTI_CONDITION_PATTERN = re.compile(r"并且|而且|同时|然后|以及|；|;|.+(?:天气|时间).+(?:建议|推荐)")
+    SYSTEM_PATTERN = re.compile(r"读取文件|查看文件|搜索文件|查找文件|创建文件|新建文件|打开应用|打开文件夹|切换窗口|截图|剪贴板|notepad|vscode|chrome", re.I)
 
     def __init__(self, tool_registry: Any | None = None) -> None:
         self.tool_registry = tool_registry
@@ -32,7 +33,7 @@ class IntentDetector:
     def detect(self, message: str) -> str:
         text = message.strip()
         # Decision must win over a weather/time match (e.g. “明天适合跑步吗”).
-        if self.DECISION_PATTERN.search(text) or self.MULTI_CONDITION_PATTERN.search(text):
+        if self.DECISION_PATTERN.search(text) or self.MULTI_CONDITION_PATTERN.search(text) or self.SYSTEM_PATTERN.search(text):
             return Intent.DECISION_TASK.value
         if self.FACT_PATTERN.search(text):
             return Intent.DIRECT_TOOL.value

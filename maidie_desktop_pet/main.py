@@ -13,12 +13,13 @@ from core.pet import PetController
 from core.actions import ActionRegistry
 from core.settings import ConfigStore
 from core.plugins.network import NetworkPlugin
-from core.tools import TimeTool, ToolRegistry, WeatherTool
-from core.agent import AgentCore, IntentDetector, Planner, ToolExecutor
-from core.awareness import IdleDetector, MouseTracker, WindowTracker
+from core.tools import SystemTool, TimeTool, ToolRegistry, WeatherTool
+from core.agent import AgentCore, ConfirmationBroker, IntentDetector, Planner, ToolExecutor
+from core.awareness import AppTracker, ClipboardTracker, IdleDetector, MouseTracker, WindowTracker
 from core.awareness.context import AwarenessContext
 from core.proactive import ProactiveEngine, ProactiveRuntime
 from core.tasks import TaskScheduler
+from core.vision import ScreenReader
 from input.manager import InputManager
 from memory.memory import ConversationMemory
 from ui.window import PetWindow
@@ -40,13 +41,26 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
         ROOT / "config" / "config.json"
     )
     network_plugin = NetworkPlugin(config.get("network", {}))
-    tool_registry = ToolRegistry([TimeTool(), WeatherTool()])
     memory = ConversationMemory(ROOT / "memory" / "memories.db")
+    confirmation_broker = ConfirmationBroker()
+    system_tool = SystemTool(confirmation_callback=confirmation_broker.request)
+    tool_registry = ToolRegistry([TimeTool(), WeatherTool(), system_tool])
+    proactive_options = config.get("proactive", {})
+    vision_options = config.get("vision", {})
+    idle_detector = IdleDetector(float(proactive_options.get("idle_trigger_seconds", 300)))
+    screen_reader = ScreenReader(
+        enabled=bool(vision_options.get("enabled", False)),
+        interval_seconds=float(vision_options.get("interval_seconds", 60)),
+    )
+    awareness = AwarenessContext(
+        MouseTracker(idle_detector), WindowTracker(), AppTracker(), screen_reader, ClipboardTracker()
+    )
     agent_core = AgentCore(
         detector=IntentDetector(tool_registry),
         planner=Planner(chat_client),
         executor=ToolExecutor(tool_registry, network_plugin, memory),
         memory=memory,
+        awareness_provider=awareness,
     )
     router = AIRouter(
         chat_client=chat_client,
@@ -56,9 +70,6 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
         agent_core=agent_core,
     )
     chat_client.personality_prompt = config_store.personality_prompt(config)
-    proactive_options = config.get("proactive", {})
-    idle_detector = IdleDetector(float(proactive_options.get("idle_trigger_seconds", 300)))
-    awareness = AwarenessContext(MouseTracker(idle_detector), WindowTracker())
     proactive_engine = ProactiveEngine(
         enabled=bool(proactive_options.get("enabled", False)),
         cooldown_seconds=float(proactive_options.get("cooldown_seconds", 900)),
@@ -87,6 +98,7 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
         controller=controller,
         assets_dir=ROOT / "assets",
         options=config.get("window", {}),
+        confirmation_broker=confirmation_broker,
     )
     input_manager = InputManager(window.global_rect)
     input_manager.cursor_moved.connect(controller.on_cursor_moved)

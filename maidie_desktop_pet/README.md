@@ -23,6 +23,20 @@ Agent V2 使用固定链路：`Desktop Awareness → Proactive/Scheduler → Too
 - 主动行为默认关闭，可在“性格与模型设置 → 主动行为”中开启，并设置 30–60 秒观察间隔和最短打扰间隔。
 - 主动内容继续通过现有 Agent Router 与五字段输出协议；Tool 仍只返回数据，缺少必要事实时不允许 LLM 猜测。
 
+## Agent V3（屏幕理解与半自动系统操作）
+
+V3 链路为：`User/Proactive → Memory → Screen/App Awareness → Planner → Executor → Synthesizer → UI`。
+
+- `core/vision/screen_reader.py` 按可配置间隔截屏，在内存中使用 pytesseract OCR，并输出屏幕文字、应用线索、语义场景与置信度。屏幕理解默认关闭，开启前由设置页明确授权；OCR 在本机完成，但相关文字可能随当前 Agent 任务发送给用户配置的 AI 服务。
+- `core/awareness/app_tracker.py` 读取前台进程名和窗口标题，分类为 coding、browsing、chatting、gaming 或 unknown；剪贴板监听只观察 Windows 序列号变化，不读取内容。
+- `core/tools/system_tools.py` 支持读取/搜索/创建文件、打开白名单应用、打开文件夹、切换窗口、截图和写剪贴板。读取文件、搜索文件和截图按只读能力处理；其余动作必须弹出确认框。
+- `delete_file`、`execute_script` 和 `system_command` 被显式列为危险动作，当前版本即使确认也不会执行。
+- Planner 的 system 步骤包含 `requires_confirmation`，Executor 负责真实执行并将纯数据结果交给 Synthesizer；Tool 不输出用户结论，五字段 AI 响应结构保持不变。
+- 确认请求从后台执行线程回到 PyQt 主线程；默认按钮为“否”，超时自动拒绝，确认框不会展示待写入的文件内容或剪贴板正文。
+- Proactive Engine 新增屏幕场景变化、频繁切换窗口和剪贴板变化触发，并继续受总冷却时间限制。
+
+OCR 需要 Python 包 `pytesseract` 以及 Windows 上安装的 Tesseract OCR 程序；未安装或识别失败时只返回不可用状态，不会阻塞 Maidie 其他功能。
+
 Maidie 是一个常驻 Windows 桌面的二次元 AI 女仆桌宠。项目使用 Python、PyQt6、
 hatch-pet WebP 动画图集和 DeepSeek/OpenAI 兼容接口，具备透明置顶窗口、自然移动、
 鼠标互动、流式聊天、技术问题路由、最近聊天、人格设置和可扩展动作系统。

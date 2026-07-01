@@ -41,6 +41,9 @@ class WindowTracker:
         if sys.platform != "win32":
             return ""
         user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = ctypes.c_void_p
+        user32.GetWindowTextLengthW.argtypes = [ctypes.c_void_p]
+        user32.GetWindowTextW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
         handle = user32.GetForegroundWindow()
         length = user32.GetWindowTextLengthW(handle)
         buffer = ctypes.create_unicode_buffer(length + 1)

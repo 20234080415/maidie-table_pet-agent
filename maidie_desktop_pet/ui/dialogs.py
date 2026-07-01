@@ -238,11 +238,19 @@ class SettingsDialog(QDialog):
         self.proactive_cooldown.setRange(1, 240)
         self.proactive_cooldown.setSuffix(" 分钟")
         self.proactive_cooldown.setValue(max(1, self.settings.get("proactive_cooldown_seconds", 900) // 60))
-        note = QLabel("默认关闭。仅读取鼠标活动和前台窗口标题，不截屏、不记录键盘内容；节流期间不会重复打扰。")
+        self.screen_awareness_enabled = QCheckBox("允许定时截屏并在本机进行 OCR")
+        self.screen_awareness_enabled.setChecked(self.settings.get("screen_awareness_enabled", False))
+        self.screen_awareness_interval = QSpinBox()
+        self.screen_awareness_interval.setRange(30, 600)
+        self.screen_awareness_interval.setSuffix(" 秒")
+        self.screen_awareness_interval.setValue(self.settings.get("screen_awareness_interval", 60))
+        note = QLabel("默认关闭。不会记录键盘内容；启用屏幕理解后，OCR 在本机完成，但相关文字可能随当前 Agent 任务发送给已配置的 AI 服务。节流期间不会重复打扰。")
         note.setWordWrap(True)
         layout.addRow("主动开关", self.proactive_enabled)
         layout.addRow("观察间隔", self.proactive_tick)
         layout.addRow("最短打扰间隔", self.proactive_cooldown)
+        layout.addRow("屏幕理解", self.screen_awareness_enabled)
+        layout.addRow("OCR 间隔", self.screen_awareness_interval)
         layout.addRow("", note)
         return page
 
@@ -263,6 +271,8 @@ class SettingsDialog(QDialog):
             "proactive_enabled": self.proactive_enabled.isChecked(),
             "proactive_tick_seconds": self.proactive_tick.value(),
             "proactive_cooldown_seconds": self.proactive_cooldown.value() * 60,
+            "screen_awareness_enabled": self.screen_awareness_enabled.isChecked(),
+            "screen_awareness_interval": self.screen_awareness_interval.value(),
         }
         if not values["base_url"] or not values["chat_model"] or not values["technical_model"]:
             return

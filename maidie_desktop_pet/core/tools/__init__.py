@@ -3,5 +3,6 @@
 from core.tools.registry import ToolRegistry
 from core.tools.time_tool import TimeTool
 from core.tools.weather_tool import WeatherTool
+from core.tools.system_tools import SystemTool
 
-__all__ = ["ToolRegistry", "TimeTool", "WeatherTool"]
+__all__ = ["SystemTool", "ToolRegistry", "TimeTool", "WeatherTool"]

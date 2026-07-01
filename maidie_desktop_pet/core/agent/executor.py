@@ -24,12 +24,19 @@ class ToolExecutor:
         return context
 
     def _run_step(self, tool_name: str, step: dict[str, Any], message: str) -> dict[str, Any]:
-        query = str(step.get("params", {}).get("query") or message)
+        params = step.get("params", {}) if isinstance(step.get("params", {}), dict) else {}
+        query = str(params.get("query") or message)
         if tool_name in ("time", "weather"):
             tool = self.tool_registry.get(tool_name)
             if tool is None:
                 raise LookupError(f"tool not registered: {tool_name}")
             return tool.run(query)
+        if tool_name == "system":
+            tool = self.tool_registry.get("system")
+            if tool is None:
+                raise LookupError("tool not registered: system")
+            operation = str(params.get("operation") or step.get("action") or "")
+            return tool.execute(operation, params)
         if tool_name == "search":
             result = self.network_plugin.handle(query)
             return {"type": "search", "raw": result, "source": "api"}

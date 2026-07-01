@@ -53,6 +53,7 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertFalse(saved["proactive"]["enabled"])
         self.assertFalse(public["proactive_enabled"])
         self.assertEqual(public["proactive_tick_seconds"], 45)
+        self.assertFalse(public["screen_awareness_enabled"])
 
 
 if __name__ == "__main__":

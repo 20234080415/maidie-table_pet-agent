@@ -128,6 +128,11 @@ class PetController(QObject):
             engine.cooldown_seconds = max(30.0, float(proactive.get("cooldown_seconds", 900)))
             tick_seconds = max(30, min(60, int(proactive.get("tick_seconds", 45))))
             self._proactive_timer.setInterval(tick_seconds * 1000)
+            screen_reader = self.proactive_runtime.awareness.screen_reader
+            if screen_reader:
+                vision = config.get("vision", {})
+                screen_reader.enabled = bool(vision.get("enabled", False))
+                screen_reader.interval_seconds = max(30.0, float(vision.get("interval_seconds", 60)))
         public = self.config_store.public_settings()
         self.settings_changed.emit(public)
         self._broadcast("on_settings_changed", public)

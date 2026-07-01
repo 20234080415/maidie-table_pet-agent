@@ -10,9 +10,11 @@ from core.agent.intent import Intent
 class AgentCore:
     """Planner -> data tools -> Synthesizer pipeline."""
 
-    def __init__(self, detector: Any, planner: Any, executor: Any, memory: Any) -> None:
+    def __init__(self, detector: Any, planner: Any, executor: Any, memory: Any,
+                 awareness_provider: Any | None = None) -> None:
         self.detector, self.planner, self.executor, self.memory = detector, planner, executor, memory
         self._memory_snapshot: dict[str, Any] = {}
+        self.awareness_provider = awareness_provider
 
     def detect_intent(self, message: str) -> str:
         self._memory_snapshot = self._load_memory()
@@ -28,7 +30,9 @@ class AgentCore:
         intent = intent or self.detect_intent(message)
         snapshot = self._memory_snapshot or self._load_memory()
         memory_context = self._planner_context(snapshot)
-        plan = self.planner.plan(message, memory_context, decision=intent == Intent.DECISION_TASK.value)
+        awareness = self._awareness_snapshot()
+        planning_context = memory_context + ("\n桌面上下文（仅供当前任务）：" + json.dumps(awareness, ensure_ascii=False, default=str) if awareness else "")
+        plan = self.planner.plan(message, planning_context, decision=intent == Intent.DECISION_TASK.value)
         executions = self.executor.execute(plan, message)
         required = [item for item in executions if item["step"].get("tool") not in ("llm", "memory")]
         if required and not all(item["ok"] for item in required):
@@ -45,6 +49,7 @@ class AgentCore:
             f"用户问题：{message}\n计划：{json.dumps(plan, ensure_ascii=False)}\n"
             f"工具数据：{json.dumps(executions, ensure_ascii=False, default=str)}\n"
             f"相关记忆：{memory_context or '无'}\n"
+            f"桌面与应用上下文：{json.dumps(awareness, ensure_ascii=False, default=str)}\n"
             "请输出包含 text、emotion、action、state 的 JSON。"
         )
         try:
@@ -81,6 +86,14 @@ class AgentCore:
                     "recent_chats": self.memory.get_recent()[-20:]}
         except Exception:
             return {"background": "", "memories": [], "recent_chats": []}
+
+    def _awareness_snapshot(self) -> dict[str, Any]:
+        if not self.awareness_provider:
+            return {}
+        try:
+            return self.awareness_provider.snapshot()
+        except Exception:
+            return {}
 
     @staticmethod
     def _planner_context(snapshot: dict[str, Any]) -> str:

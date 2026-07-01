@@ -92,7 +92,7 @@ class AgentCoreTests(unittest.TestCase):
         self.assertIn("weather", [step["tool"] for step in result["steps"]])
         self.assertIn("llm", [step["tool"] for step in result["steps"]])
         for step in result["steps"]:
-            self.assertEqual(set(step), {"tool", "action", "params"})
+            self.assertEqual(set(step), {"tool", "action", "params", "requires_confirmation"})
 
     def test_tool_execution_chain(self):
         calls = []
