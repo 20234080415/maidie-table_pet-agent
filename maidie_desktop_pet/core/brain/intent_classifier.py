@@ -4,7 +4,7 @@ import re
 
 
 class IntentClassifier:
-    """Deterministic V4 intent gate. No language model participates."""
+    """Regex fallback used only when the LLM intent router fails."""
 
     SCREEN = re.compile(
         r"你能.*(?:看到|看见).*(?:屏幕|桌面)|我在(?:干嘛|做什么)|"
@@ -19,11 +19,25 @@ class IntentClassifier:
         r"\b(?:weather|temperature|time|date|search|look up|latest|should|recommend)\b",
         re.I,
     )
+    CODE_TASK = re.compile(
+        r"修.*(?:bug|代码)|帮我.*(?:修|改).*(?:bug|代码)|代码|报错|调试|"
+        r"\b(?:bug|code|debug|fix|python|javascript|api|database|docker)\b",
+        re.I,
+    )
+    SYSTEM_TASK = re.compile(
+        r"读取文件|搜索文件|查找文件|创建文件|打开应用|打开文件夹|切换窗口|截图|剪贴板|"
+        r"\b(?:open app|open folder|read file|create file|screenshot|clipboard)\b",
+        re.I,
+    )
 
     def classify(self, user_input: str) -> str:
         text = str(user_input).strip()
         if self.SCREEN.search(text):
             return "screen"
+        if self.CODE_TASK.search(text):
+            return "code_task"
+        if self.SYSTEM_TASK.search(text):
+            return "system_task"
         if self.TASK.search(text):
             return "task"
         return "chat"

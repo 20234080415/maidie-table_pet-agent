@@ -76,6 +76,13 @@ class AIClient(ABC):
     def plan_task(self, message: str, memory_context: str) -> dict[str, Any] | None:
         return None
 
+    def route_intent(self, prompt: str, context: list[dict[str, Any]]) -> dict[str, Any]:
+        result = self.ask(prompt, context)
+        try:
+            return json.loads(str(result.get("text", "")))
+        except (TypeError, ValueError):
+            return result
+
 
 class OpenAICompatibleClient(AIClient):
     """Reusable OpenAI-compatible backend for chat or Codex-style reasoning."""
@@ -231,6 +238,41 @@ class OpenAICompatibleClient(AIClient):
             "action": "talk",
             "state": "talking",
         }, self.source)
+
+    def route_intent(self, prompt: str, context: list[dict[str, Any]]) -> dict[str, Any]:
+        """Ask the model for router JSON without Maidie response normalization."""
+        if not self.api_key or self.api_key == "YOUR_API_KEY_HERE":
+            raise RuntimeError("intent routing requires a configured LLM")
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": "You return only strict JSON for intent routing."}
+        ]
+        for item in context[-6:]:
+            if item.get("memory"):
+                messages.append({"role": "system", "content": str(item["memory"])})
+                continue
+            messages.extend([
+                {"role": "user", "content": str(item.get("message", ""))},
+                {"role": "assistant", "content": str(item.get("response", ""))},
+            ])
+        messages.append({"role": "user", "content": prompt})
+        response = requests.post(
+            f"{self.base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            json={
+                "model": self.model,
+                "messages": messages,
+                "temperature": 0,
+                "response_format": {"type": "json_object"},
+                "max_tokens": 300,
+            },
+            timeout=min(self.timeout, 20),
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"]
+        result = json.loads(content)
+        if not isinstance(result, dict):
+            raise ValueError("intent router returned non-object JSON")
+        return result
 
     def extract_memories(self, message: str, response: str) -> dict[str, list[Any]]:
         """Extract durable, non-sensitive user memories from one exchange."""

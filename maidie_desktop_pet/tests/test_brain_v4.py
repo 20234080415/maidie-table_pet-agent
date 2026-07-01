@@ -3,19 +3,29 @@ from __future__ import annotations
 import unittest
 
 from ai.client import AIClient, normalize_response
-from core.brain import BrainPlanner, BrainRouter, IntentClassifier, Synthesizer
+from core.brain import BrainPlanner, BrainRouter, IntentClassifier, LLMIntentRouter, Synthesizer
 from core.tools import MemoryTool, ScreenTool, SearchTool, TimeTool, ToolRegistry
 from core.tools.base import Tool
 
 
 class Client(AIClient):
     def __init__(self, text="结果已经准备好了"):
-        self.text, self.prompts = text, []
+        self.text, self.prompts, self.intent_prompts = text, [], []
 
     def ask(self, prompt, context):
         self.prompts.append(prompt)
         return normalize_response({"text": self.text, "emotion": "happy",
                                    "action": "talk", "state": "talking"}, "chat")
+
+    def route_intent(self, prompt, context):
+        self.intent_prompts.append(prompt)
+        if "你能看到我屏幕吗" in prompt or "我在做什么" in prompt or "我在干嘛" in prompt:
+            return {"intent": "screen", "confidence": 0.95, "reason": "desktop state request"}
+        if "帮我修bug" in prompt:
+            return {"intent": "code_task", "confidence": 0.95, "reason": "debug request"}
+        if "明天适合跑步吗" in prompt or "天气" in prompt or "几点" in prompt:
+            return {"intent": "task", "confidence": 0.9, "reason": "tool facts needed"}
+        return {"intent": "chat", "confidence": 0.8, "reason": "conversation"}
 
 
 class Memory:
@@ -52,11 +62,22 @@ class BrainV4AcceptanceTests(unittest.TestCase):
         ])
         self.router = BrainRouter(self.client, self.client, self.registry, self.memory)
 
-    def test_router_intent(self):
-        classifier = IntentClassifier()
-        self.assertEqual(classifier.classify("陪我聊会儿"), "chat")
-        self.assertEqual(classifier.classify("现在几点"), "task")
-        self.assertEqual(classifier.classify("你能看到我屏幕吗"), "screen")
+    def test_llm_router_intent(self):
+        router = LLMIntentRouter(self.client, IntentClassifier())
+        self.assertEqual(router.classify("明天适合跑步吗"), "task")
+        self.assertEqual(router.classify("你能看到我屏幕吗"), "screen")
+        self.assertEqual(router.classify("帮我修bug"), "code_task")
+        self.assertEqual(router.classify("好无聊"), "chat")
+        self.assertTrue(all("You are the intent router" in prompt for prompt in self.client.intent_prompts))
+
+    def test_regex_only_when_llm_router_fails(self):
+        class BrokenClient(Client):
+            def route_intent(self, prompt, context):
+                raise RuntimeError("offline")
+
+        router = LLMIntentRouter(BrokenClient(), IntentClassifier())
+        self.assertEqual(router.classify("你能看到我屏幕吗"), "screen")
+        self.assertEqual(router.last_route["source"], "fallback")
 
     def test_planner_execution(self):
         plan = BrainPlanner().plan("明天天气适不适合跑步", self.memory)
@@ -79,7 +100,7 @@ class BrainV4AcceptanceTests(unittest.TestCase):
             self.assertNotIn("text", result)
 
     def test_screen_pipeline(self):
-        result = self.router.ask("我在做什么？", [])
+        result = self.router.ask("你能看到我屏幕吗", [])
         self.assertEqual(self.awareness.calls, 1)
         self.assertEqual(result["source"], "screen")
         self.assertIn('"context": "coding"', self.client.prompts[-1])

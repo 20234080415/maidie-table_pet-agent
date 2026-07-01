@@ -9,6 +9,15 @@ class BrainPlanner:
 
     DECISION = re.compile(r"适不适合|是否适合|适合.*吗|要不要|该不该|是否应该|建议|推荐|should", re.I)
 
+    def plan_for_intent(self, user_input: str, intent: str, memory: Any = None) -> dict[str, Any]:
+        if intent == "screen":
+            return self.screen_plan(user_input)
+        if intent == "code_task":
+            return self.code_plan(user_input)
+        if intent == "system_task":
+            return self.system_plan(user_input)
+        return self.plan(user_input, memory)
+
     def plan(self, user_input: str, memory: Any = None) -> dict[str, Any]:
         text = str(user_input).strip()
         steps: list[dict[str, Any]] = []
@@ -33,6 +42,20 @@ class BrainPlanner:
     def screen_plan(user_input: str) -> dict[str, Any]:
         return {"goal": str(user_input).strip(), "steps": [
             BrainPlanner._step("screen", "读取当前桌面事实", {"force": True})
+        ]}
+
+    @staticmethod
+    def code_plan(user_input: str) -> dict[str, Any]:
+        return {"goal": str(user_input).strip(), "steps": [
+            BrainPlanner._step("codex", "分析代码任务并给出可执行修复资料", {"query": str(user_input).strip()})
+        ]}
+
+    @staticmethod
+    def system_plan(user_input: str) -> dict[str, Any]:
+        text = str(user_input).strip()
+        action = "search_files" if re.search(r"搜索文件|查找文件|find file|search files", text, re.I) else "read_file"
+        return {"goal": text, "steps": [
+            BrainPlanner._step("system", "读取或检索本地系统事实", {"query": text, "operation": action})
         ]}
 
     @staticmethod

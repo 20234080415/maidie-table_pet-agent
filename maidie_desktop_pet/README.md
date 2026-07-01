@@ -4,10 +4,13 @@
 
 ### Maidie Core Brain V4
 
-生产聊天入口现在统一经过 `core/brain/BrainRouter`：确定性分类器先区分
-`chat/task/screen`，任务由不依赖 LLM 的 Planner 选择数据工具，最后只有
-Synthesizer 可以生成用户可见文本。`core/personality/MaidieStyle` 在最终边界保留
-可爱、轻傲娇的桌宠语气，并过滤 Router、Planner 与工具调用等内部表述。
+生产聊天入口现在统一经过 `core/brain/BrainRouter`：`LLMIntentRouter` 是唯一正常
+意图决策入口，负责把用户输入分类为 `chat/task/screen/code_task/system_task`。
+旧的 regex `IntentClassifier` 只在 LLM 路由失败、超时、空输出或返回非法 JSON 时
+作为安全兜底，不再主导正常路由。Planner 只根据意图生成结构化工具计划，工具只返回
+`type/raw/source` 数据，最后只有 Synthesizer 可以生成用户可见文本。
+`core/personality/MaidieStyle` 在最终边界保留可爱、轻傲娇的桌宠语气，并过滤
+Router、Planner 与工具调用等内部表述。
 
 V4 内置 `time/weather/search/screen/memory` 数据工具。工具只返回结构化事实；
 天气、时间与屏幕内容不能由模型猜测。旧 Agent V1–V3 模块作为兼容层继续保留。
@@ -17,7 +20,7 @@ Maidie 当前采用统一链路：
 ```text
 User / Proactive
   → Memory + Desktop/Screen/App Awareness
-  → Intent Detector
+  → LLM Intent Router
   → Planner
   → Tool/System Executor
   → Synthesizer
@@ -32,11 +35,13 @@ User / Proactive
 
 ### 路由与防幻觉
 
+- LLM Router 首先判断 `chat/task/screen/code_task/system_task`；regex 仅在 LLM 路由失败时兜底。
+- 路由提示词要求模型只返回 `intent/confidence/reason` JSON，不允许在路由层回答用户。
+- `task` 进入 Planner 后必须拆解步骤并显式选择 `weather/time/search/screen/memory/codex/opencode/system` 等工具。
 - 屏幕能力问题优先进入 `SCREEN_AWARENESS`，固定执行 `screen_ocr → app_tracker → window_tracker`。
 - 三项结果统一为 `screen_text/app/window/context` 后才交给 Synthesizer；LLM 只解释工具事实。
 - 显式屏幕询问会触发一次强制 OCR；后台屏幕理解仍遵守“默认关闭”的隐私设置。
 - 所有模型输入都会注入桌面 Agent 能力声明，禁止模型绕过 Router 猜测屏幕状态。
-- 输入分类为 `DIRECT_TOOL`、`DECISION_TASK` 或 `CHAT`；决策词优先于天气/时间匹配。
 - Tool 只返回 `type/raw/source` 数据，Planner 不回答用户，最终文本只能由 Synthesizer 输出。
 - 天气和时间必须分别来自 WeatherTool 与 TimeTool；数据缺失时不允许 LLM 猜测。
 - 最终响应始终保持 `text/emotion/action/state/source` 五字段结构。
@@ -371,7 +376,19 @@ config/config.json
 
 ## Agent 执行协议
 
-Planner 生成 JSON 计划，步骤工具限定为 `time|weather|search|system|memory|llm`：
+正常链路遵循一句话原则：LLM 决定做什么，Planner 决定怎么做，工具提供事实，Maidie
+决定怎么说。`LLMIntentRouter` 的输出格式固定为：
+
+```json
+{
+  "intent": "chat|task|screen|code_task|system_task",
+  "confidence": 0.0,
+  "reason": "short explanation"
+}
+```
+
+Planner 生成 JSON 计划，步骤工具限定为
+`weather|time|search|screen|memory|system|codex|opencode`：
 
 ```json
 {
@@ -384,16 +401,17 @@ Planner 生成 JSON 计划，步骤工具限定为 `time|weather|search|system|m
       "requires_confirmation": false
     },
     {
-      "tool": "llm",
-      "action": "仅根据已有数据总结",
-      "params": {},
-      "requires_confirmation": false
+      "tool": "memory",
+      "action": "读取相关偏好",
+      "params": {"limit": 20}
     }
   ]
 }
 ```
 
-Executor 顺序执行工具并收集纯数据结果，Synthesizer 最后统一表达。系统写操作即使由 Planner 标记为无需确认，SystemTool 仍会在执行层强制确认，形成双重安全校验。
+Executor 顺序执行工具并收集纯数据结果，Synthesizer 最后统一表达。工具层禁止生成最终回答或
+暴露推理过程；系统写操作即使由 Planner 标记为无需确认，SystemTool 仍会在执行层强制确认，
+形成双重安全校验。
 
 ## 记忆系统
 
@@ -497,6 +515,7 @@ maidie_desktop_pet/
 ├── core/
 │   ├── actions.py              # 动作注册表、触发词与冷却
 │   ├── behavior.py             # 自主行为规划
+│   ├── brain/                  # LLM-first 路由、Planner 与人格合成
 │   ├── movement.py             # 速度、加速度与边界
 │   ├── pet.py                  # 唯一中央控制器
 │   ├── settings.py             # 配置持久化与热更新
