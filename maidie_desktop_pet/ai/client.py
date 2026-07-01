@@ -102,12 +102,12 @@ class OpenAICompatibleClient(AIClient):
         if not self.api_key or self.api_key == "YOUR_API_KEY_HERE":
             if self.source == "codex":
                 return normalize_response({
-                    "text": "技术模式已经准备好啦，不过还没有配置 DeepSeek API Key。",
+                    "text": "还没有配置 API Key，请右键 Maidie 打开“性格与模型设置”后填写。",
                     "emotion": "thinking", "action": "thinking", "state": "thinking",
                 }, "codex")
             return normalize_response({
-                "text": "主人终于想起我啦？哼，我才没有一直在等呢。",
-                "emotion": "excited", "action": "talk", "state": "talking",
+                "text": "还没有配置 API Key，请右键 Maidie 打开“性格与模型设置”后填写。",
+                "emotion": "thinking", "action": "talk", "state": "talking",
             }, "chat")
 
         system_prompt = self.system_prompt

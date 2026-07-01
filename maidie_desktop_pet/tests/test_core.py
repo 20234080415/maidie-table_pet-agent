@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from ai.client import AIClient, normalize_response
+from ai.client import AIClient, OpenAICompatibleClient, normalize_response
 from ai.router import AIRouter
 from core.movement import Bounds, MovementController, Vec2
 from core.state import BehaviorPriority, PetState, StateMachine
@@ -60,6 +60,12 @@ class RouterTests(unittest.TestCase):
     def test_every_response_has_contract_fields(self):
         result = self.router.ask("hello", [])
         self.assertEqual(set(result), {"text", "emotion", "action", "state", "source"})
+
+    def test_missing_key_points_user_to_settings(self):
+        client = OpenAICompatibleClient("", "https://api.deepseek.com", "test")
+        result = client.ask("hello", [])
+        self.assertIn("右键", result["text"])
+        self.assertIn("设置", result["text"])
 
 
 if __name__ == "__main__":

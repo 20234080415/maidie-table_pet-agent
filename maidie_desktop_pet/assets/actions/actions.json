@@ -70,5 +70,17 @@
     "priority": 100,
     "state": "reacting",
     "gesture": "drag-right"
+  },
+  "dizzy-left": {
+    "file": "dizzy-left.webp",
+    "frames": 6,
+    "interval": 155,
+    "render_scale": 1.0,
+    "loop": false,
+    "duration_ms": 1100,
+    "cooldown_ms": 1500,
+    "priority": 100,
+    "state": "reacting",
+    "gesture": "drag-left"
   }
 }

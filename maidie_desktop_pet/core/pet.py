@@ -17,6 +17,8 @@ from core.state import BehaviorPriority, PetState, StateMachine
 class PetController(QObject):
     """Single source of truth for state, priorities, motion and AI orchestration."""
 
+    DRAG_ACTION_THRESHOLD = 30.0
+
     state_changed = pyqtSignal(str)
     animation_changed = pyqtSignal(str)
     position_requested = pyqtSignal(float, float)
@@ -165,10 +167,15 @@ class PetController(QObject):
         self.movement.stop()
         self.sync_geometry(x, y, width, height)
         self.behavior.postpone(2.5)
-        if drag_dx > 30:
-            self._play_action("dizzy-right", force=True)
-        else:
-            self.set_state(PetState.IDLE, BehaviorPriority.USER_CLICK, 250, force=True)
+        gesture = None
+        if drag_dx > self.DRAG_ACTION_THRESHOLD:
+            gesture = "drag-right"
+        elif drag_dx < -self.DRAG_ACTION_THRESHOLD:
+            gesture = "drag-left"
+        action = self.action_registry.match_gesture(gesture) if gesture and self.action_registry else None
+        if action and self._play_action(action, force=True):
+            return
+        self._restore_after_interaction()
 
     def on_pet_clicked(self) -> None:
         self.movement.stop()

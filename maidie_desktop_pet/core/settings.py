@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from copy import deepcopy
 from pathlib import Path
 from threading import RLock
@@ -19,13 +20,23 @@ PERSONALITY_PRESETS = {
 class ConfigStore:
     """Thread-safe JSON settings with atomic replacement and secret-safe views."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, default_path: Path | None = None):
         self.path = path
+        self.default_path = default_path
         self._lock = RLock()
 
     def load(self) -> dict[str, Any]:
         with self._lock:
+            self._ensure_exists()
             return json.loads(self.path.read_text(encoding="utf-8"))
+
+    def _ensure_exists(self) -> None:
+        if self.path.exists():
+            return
+        if not self.default_path or not self.default_path.exists():
+            raise FileNotFoundError(f"Missing Maidie default configuration: {self.default_path}")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(self.default_path, self.path)
 
     def public_settings(self) -> dict[str, Any]:
         config = self.load()
@@ -73,6 +84,7 @@ class ConfigStore:
         return PERSONALITY_PRESETS.get(preset, PERSONALITY_PRESETS["gentle_tsundere"])[1]
 
     def _atomic_write(self, config: dict[str, Any]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")
         temporary.write_text(
             json.dumps(config, ensure_ascii=False, indent=2) + "\n",

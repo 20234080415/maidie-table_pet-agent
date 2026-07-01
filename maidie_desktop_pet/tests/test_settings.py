@@ -41,6 +41,14 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertIn("安静", self.store.personality_prompt(saved))
         self.assertEqual(saved["window"]["width"], 160)
 
+    def test_missing_config_is_copied_from_default(self):
+        target = Path(self.temp.name) / "new" / "config.json"
+        default = Path(self.temp.name) / "default.json"
+        default.write_text(json.dumps({"ai": {"api_key": ""}}), encoding="utf-8")
+        loaded = ConfigStore(target, default).load()
+        self.assertEqual(loaded, {"ai": {"api_key": ""}})
+        self.assertTrue(target.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

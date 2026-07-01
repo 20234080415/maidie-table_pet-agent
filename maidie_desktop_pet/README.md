@@ -40,7 +40,8 @@ hatch-pet WebP 动画图集和 DeepSeek/OpenAI 兼容接口，具备透明置顶
 - 在头顶明显纵向移动或单向大幅移动：仍然拖动窗口。
 - 单击脸颊：戳脸反应。
 - 单击身体：调用 AI 进行自然回复。
-- 向右拖动并松手：播放晕乎动作。
+- 向右拖动超过阈值并松手：播放 `dizzy-right` 晕乎动作。
+- 向左拖动超过阈值并松手：播放 `dizzy-left` 晕乎动作。
 - 双击 Maidie，或按 `Enter`、空格：打开聊天输入框。
 - 输入框按 `Esc`、失去焦点、发送完成或 10 秒无操作后自动收起。
 - 输入过程中无操作计时会自动重置。
@@ -124,20 +125,27 @@ DeepSeek 提供，不代表正在调用 OpenAI Codex。
 | `celebrate` | 成功、完成、搞定、感谢、success 等表达 | 4s |
 | `sleepy` | 自主行为偶发 | 30s |
 | `dizzy-right` | 向右拖动超过阈值并松手 | 1.5s |
+| `dizzy-left` | 向左拖动超过阈值并松手 | 1.5s |
 
 完整配置位于 `assets/actions/actions.json`。
 
 ## 安装与启动
 
-### 环境要求
+### 普通用户启动方式
 
-- Windows 10/11。
-- Python 3.10 或更高版本。
-- 推荐使用独立虚拟环境。
+普通用户不需要安装 Python。下载发布包后双击：
 
-### 快速启动
+```text
+Maidie.exe
+```
 
-双击：
+首次启动会在 `%APPDATA%\Maidie\config\config.json` 创建个人配置。未填写 API Key
+也可以正常启动；聊天时 Maidie 会提示右键打开“性格与模型设置”。关闭桌宠窗口会隐藏到
+系统托盘，可从托盘菜单重新显示、打开设置或退出。
+
+### 开发者启动方式
+
+开发环境需要 Windows 10/11 和 Python 3.10 或更高版本。可以直接双击：
 
 ```text
 start_maidie.bat
@@ -145,7 +153,7 @@ start_maidie.bat
 
 脚本会在首次启动时创建 `.venv` 并安装依赖。
 
-### 手动启动
+也可以手动启动：
 
 ```powershell
 cd "C:\Users\85949\Desktop\桌宠\maidie\maidie_desktop_pet"
@@ -160,6 +168,24 @@ python main.py
 - `PyQt6`：桌面窗口与交互。
 - `requests`：AI API 和 SSE 流式传输。
 - `Pillow`：导入绿幕动作条时使用。
+
+## 打包发布
+
+项目使用 PyInstaller 生成无需 Python 环境的单文件 Windows 程序。在 PowerShell 中运行：
+
+```powershell
+.\build_windows.ps1
+```
+
+脚本会安装构建依赖并根据 `maidie.spec` 打包，输出文件为：
+
+```text
+dist\Maidie.exe
+```
+
+打包内容包括主图集、`assets/actions` 外部动作、`pet.json`、无 Key 的默认配置模板和
+必要的项目说明文件。运行时只读资源从 PyInstaller 临时目录加载，个人配置、日志和聊天
+记忆写入 `%APPDATA%\Maidie`，升级 exe 不会覆盖用户设置。
 
 ## 模型与 API 配置教程
 
@@ -420,6 +446,25 @@ python -m unittest discover -v
 - Qt 图集加载、缩放、跟随浮窗和动作恢复的集成检查。
 
 ## 常见问题
+
+### 打包后提示找不到 spritesheet.webp 或动作文件
+
+请使用仓库中的 `maidie.spec` 构建，不要只对 `main.py` 执行默认 PyInstaller 命令。
+spec 会把整个 `assets` 目录放入程序，并由统一资源路径自动定位。
+
+### 构建时提示找不到 PyInstaller 或依赖
+
+优先运行 `.\build_windows.ps1`，脚本会安装 `requirements.txt` 和 PyInstaller。如果当前
+虚拟环境损坏，可删除 `.venv` 后重新运行 `start_maidie.bat`，再执行构建脚本。
+
+### exe 启动后没有显示窗口
+
+先检查系统托盘中是否已有 Maidie。若仍未出现，查看 `%APPDATA%\Maidie\logs\maidie.log`；
+部分安全软件也可能在首次运行时拦截未签名的 exe。
+
+### 更换 exe 后设置消失了吗
+
+不会。发布版设置保存在 `%APPDATA%\Maidie`，不在 exe 或其临时解包目录中。
 
 ### 填了 Key 仍然无法聊天
 
