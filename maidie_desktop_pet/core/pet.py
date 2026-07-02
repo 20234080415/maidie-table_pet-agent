@@ -65,6 +65,11 @@ class PetController(QObject):
         self.behavior_orchestrator = BehaviorOrchestrator()
         self.bounds = Bounds(0, 0, 1920, 1080)
         self.fence = FenceController()
+        self.drag_active = False
+        self._drag_session = 0
+        self._released_drag_session = -1
+        self._drag_outside_logged = False
+        self._drag_pause_logged = False
         self.cursor = Vec2()
         self.cursor_chase = False
         self._listeners: dict[str, list[Callable[..., None]]] = defaultdict(list)
@@ -285,11 +290,57 @@ class PetController(QObject):
         self.sync_geometry(x, y, self.movement.window_width, self.movement.window_height)
         self.position_requested.emit(x, y)
         self.behavior.postpone(1.0)
+        self._emit_fence_feedback("fence_enabled", "shy")
+        self._log_fence("fence_enabled", rect=rect)
         return rect
 
     def disable_fence(self) -> None:
+        was_enabled = self.fence.is_enabled()
         self.fence.disable()
         self.behavior.postpone(1.0)
+        if was_enabled:
+            self._emit_fence_feedback("fence_disabled", "celebrate")
+            self._log_fence("fence_disabled")
+
+    def _emit_fence_feedback(self, event: str, action: str) -> None:
+        text = self.fence.dialogues.get(event)
+        self._log_fence("fence_dialogue_event", dialogue_event=event)
+        self._log_fence("fence_dialogue_selected", dialogue=text)
+        if self.fence.dialogues.last_avoided_repeat:
+            self._log_fence("fence_dialogue_avoid_repeat", dialogue_event=event)
+        self.local_message_requested.emit(text)
+        if not self._play_action(action, force=True):
+            animation = "happy" if event == "fence_disabled" else "reacting"
+            self.set_state(PetState.REACTING, BehaviorPriority.USER_CLICK, 700,
+                           force=True, animation=animation)
+
+    def _log_fence(self, event: str, **fields: Any) -> None:
+        try:
+            details = " ".join(f"{key}={value}" for key, value in fields.items())
+            self.logger.debug("%s%s", event, f" {details}" if details else "")
+        except Exception:
+            pass
+
+    def on_pet_drag_started(self) -> None:
+        self.drag_active = True
+        self._drag_session += 1
+        self._drag_outside_logged = False
+        self._drag_pause_logged = False
+        self.movement.stop()
+        self._log_fence("fence_drag_started", drag_session=self._drag_session)
+
+    def on_pet_drag_moved(self, x: float, y: float, width: float, height: float) -> None:
+        if not self.drag_active:
+            return
+        self.sync_geometry(x, y, width, height)
+        if (self.fence.is_enabled()
+                and not self.fence.contains_pet(x, y, width, height)
+                and not self._drag_outside_logged):
+            self._drag_outside_logged = True
+            self._log_fence("fence_drag_moving_outside", x=x, y=y)
+
+    def on_pet_drag_cancelled(self) -> None:
+        self.drag_active = False
 
     def sync_geometry(self, x: float, y: float, width: float, height: float) -> None:
         self.movement.sync_geometry(x, y, width, height)
@@ -297,6 +348,14 @@ class PetController(QObject):
     def on_pet_dragged(
         self, x: float, y: float, width: float, height: float, drag_dx: float = 0.0
     ) -> None:
+        if (self._drag_session > 0 and not self.drag_active
+                and self._released_drag_session == self._drag_session):
+            return
+        if self.drag_active and self._released_drag_session == self._drag_session:
+            return
+        if self.drag_active:
+            self._released_drag_session = self._drag_session
+        self.drag_active = False
         self.movement.stop()
         was_outside = self.fence.is_enabled() and not self.fence.contains_pet(
             x, y, width, height
@@ -304,17 +363,21 @@ class PetController(QObject):
         x, y = self.fence.nearest_inside_position(x, y, width, height)
         self.sync_geometry(x, y, width, height)
         if was_outside:
+            self._log_fence("fence_drag_released_outside")
+            self._log_fence("fence_snapback_target", x=x, y=y)
             self.position_requested.emit(x, y)
+        else:
+            self._log_fence("fence_drag_released_inside")
         previous_facing = self.direction.facing_right
         facing_right = self.direction.update_direction(drag_dx)
         if facing_right != previous_facing:
             self.facing_changed.emit(facing_right)
-        self.behavior.postpone(2.5)
+        self.behavior.postpone(0.3 if was_outside else 2.5)
         if was_outside and self.fence.should_complain():
-            self.local_message_requested.emit(self.fence.complaint_text())
-            if not self._play_action("shy", force=True):
-                self.set_state(PetState.REACTING, BehaviorPriority.USER_CLICK, 900,
-                               force=True, animation="reacting")
+            self._emit_fence_feedback("fence_snapback", "shy")
+            return
+        if was_outside:
+            self._log_fence("fence_complain_suppressed_by_cooldown")
             return
         if drag_dx > 30:
             self._play_action("dizzy-right", force=True)
@@ -598,6 +661,14 @@ class PetController(QObject):
         now = monotonic()
         dt = now - self._last_tick
         self._last_tick = now
+
+        if self.drag_active:
+            if not self._drag_pause_logged:
+                self._drag_pause_logged = True
+                self._log_fence("movement_paused_for_drag")
+                if self.fence.is_enabled():
+                    self._log_fence("fence_clamp_skipped_during_drag")
+            return
 
         active_bounds = self.active_bounds()
         if not self._busy and self.state_machine.can_interrupt(BehaviorPriority.AUTONOMOUS):

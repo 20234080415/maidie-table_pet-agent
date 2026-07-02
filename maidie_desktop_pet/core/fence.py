@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass, field
 from time import monotonic
 from typing import Callable
 
+from core.experience import DialoguePool
 from core.movement import Bounds
 
 
@@ -20,13 +20,7 @@ class FenceZone:
     clock_ms: Callable[[], float] = field(
         default=lambda: monotonic() * 1000, repr=False
     )
-    chooser: Callable[[tuple[str, ...]], str] = field(default=random.choice, repr=False)
-
-    COMPLAINTS = (
-        "呜……为什么把我关起来啦！",
-        "小唐哥，你这是给我画地为牢嘛？",
-        "我才没有想跑出去呢……哼。",
-    )
+    dialogues: DialoguePool = field(default_factory=DialoguePool, repr=False)
 
     def enable(self, rect: Bounds | tuple[float, float, float, float]) -> None:
         if not isinstance(rect, Bounds):
@@ -98,7 +92,7 @@ class FenceZone:
         return True
 
     def complaint_text(self) -> str:
-        return self.chooser(self.COMPLAINTS)
+        return self.dialogues.get("fence_snapback")
 
     def enable_default(self, center_x: float, center_y: float, screen: Bounds,
                        pet_width: float, pet_height: float,
@@ -114,4 +108,3 @@ class FenceZone:
 
 class FenceController(FenceZone):
     """Semantic controller name retained for integration sites."""
-

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import os
 import unittest
+from time import monotonic
+from unittest.mock import Mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication
 
 from core.behavior import AutonomousBehaviorController
+from core.experience import DialoguePool
 from core.fence import FenceController, FenceZone
 from core.movement import Bounds, MovementController, Vec2
 from core.pet import PetController
@@ -85,13 +88,33 @@ class FenceZoneTests(unittest.TestCase):
         self.assertEqual(position, Vec2(160, 160))
 
 
+class DialoguePoolTests(unittest.TestCase):
+    def test_event_pools_are_separate_and_populated(self):
+        pool = DialoguePool()
+        for event in ("fence_enabled", "fence_disabled", "fence_snapback",
+                      "fence_edge_complain"):
+            self.assertGreaterEqual(len(pool.phrases(event)), 4)
+        self.assertNotEqual(pool.phrases("fence_enabled"), pool.phrases("fence_disabled"))
+
+    def test_multiple_phrases_do_not_repeat_consecutively(self):
+        pool = DialoguePool({"event": ("a", "b", "c")}, chooser=lambda values: values[0])
+        self.assertEqual(pool.get("event"), "a")
+        self.assertEqual(pool.get("event"), "b")
+        self.assertTrue(pool.last_avoided_repeat)
+
+    def test_single_phrase_may_repeat(self):
+        pool = DialoguePool({"event": ("only",)}, chooser=lambda values: values[0])
+        self.assertEqual(pool.get("event"), "only")
+        self.assertEqual(pool.get("event"), "only")
+
+
 class FenceControllerIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
     def test_external_drag_snaps_back_and_disable_restores_range(self):
-        controller = PetController(object(), _Memory())
+        controller = PetController(object(), _Memory(), logger=Mock())
         controller._tick_timer.stop()
         controller.set_screen_bounds(0, 0, 1000, 800)
         controller.sync_geometry(400, 300, 100, 100)
@@ -99,7 +122,12 @@ class FenceControllerIntegrationTests(unittest.TestCase):
         controller.position_requested.connect(lambda x, y: positions.append((x, y)))
         controller.local_message_requested.connect(complaints.append)
         controller.enable_fence()
+        self.assertIn(complaints[-1], controller.fence.dialogues.phrases("fence_enabled"))
+        complaints.clear()
+        positions.clear()
 
+        controller.on_pet_drag_started()
+        controller.on_pet_drag_moved(0, 0, 100, 100)
         controller.on_pet_dragged(0, 0, 100, 100)
 
         self.assertTrue(controller.fence.contains_pet(
@@ -107,10 +135,80 @@ class FenceControllerIntegrationTests(unittest.TestCase):
         ))
         self.assertTrue(positions)
         self.assertEqual(len(complaints), 1)
+        self.assertIn(complaints[0], controller.fence.dialogues.phrases("fence_snapback"))
 
         controller.disable_fence()
+        self.assertIn(complaints[-1], controller.fence.dialogues.phrases("fence_disabled"))
+        controller.on_pet_drag_started()
+        controller.on_pet_drag_moved(0, 0, 100, 100)
         controller.on_pet_dragged(0, 0, 100, 100)
         self.assertEqual(controller.movement.position, Vec2(0, 0))
+        controller.shutdown()
+
+    def make_controller(self):
+        controller = PetController(object(), _Memory(), logger=Mock())
+        controller._tick_timer.stop()
+        controller.set_screen_bounds(0, 0, 1000, 800)
+        controller.sync_geometry(400, 300, 100, 100)
+        controller.enable_fence()
+        return controller
+
+    def test_dragging_outside_pauses_tick_clamp_and_complaint(self):
+        controller = self.make_controller()
+        messages = []
+        controller.local_message_requested.connect(messages.append)
+        controller.on_pet_drag_started()
+        controller.on_pet_drag_moved(0, 0, 100, 100)
+        outside = Vec2(controller.movement.position.x, controller.movement.position.y)
+
+        controller._tick()
+
+        self.assertEqual(controller.movement.position, outside)
+        self.assertFalse(controller.fence.contains_pet(outside.x, outside.y, 100, 100))
+        self.assertEqual(messages, [])
+        controller.on_pet_drag_cancelled()
+        controller.shutdown()
+
+    def test_release_inside_has_no_snapback_or_complaint(self):
+        controller = self.make_controller()
+        positions, messages = [], []
+        controller.position_requested.connect(lambda x, y: positions.append((x, y)))
+        controller.local_message_requested.connect(messages.append)
+        x, y = controller.fence.clamp_point(420, 320, 100, 100)
+        controller.on_pet_drag_started()
+        controller.on_pet_drag_moved(x, y, 100, 100)
+
+        controller.on_pet_dragged(x, y, 100, 100)
+
+        self.assertEqual(positions, [])
+        self.assertEqual(messages, [])
+        controller.shutdown()
+
+    def test_one_drag_release_snapbacks_and_complains_at_most_once(self):
+        controller = self.make_controller()
+        positions, messages = [], []
+        controller.position_requested.connect(lambda x, y: positions.append((x, y)))
+        controller.local_message_requested.connect(messages.append)
+        controller.on_pet_drag_started()
+        controller.on_pet_drag_moved(0, 0, 100, 100)
+
+        controller.on_pet_dragged(0, 0, 100, 100)
+        controller.on_pet_dragged(0, 0, 100, 100)
+
+        self.assertEqual(len(positions), 1)
+        self.assertEqual(len(messages), 1)
+        self.assertLessEqual(controller.behavior._next_decision - monotonic(), 0.5)
+        controller.shutdown()
+
+    def test_snapback_complaint_still_obeys_cooldown(self):
+        controller = self.make_controller()
+        messages = []
+        controller.local_message_requested.connect(messages.append)
+        for _ in range(2):
+            controller.on_pet_drag_started()
+            controller.on_pet_drag_moved(0, 0, 100, 100)
+            controller.on_pet_dragged(0, 0, 100, 100)
+        self.assertEqual(len(messages), 1)
         controller.shutdown()
 
 

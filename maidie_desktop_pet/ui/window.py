@@ -150,6 +150,7 @@ class PetWindow(QWidget):
             self._gesture_consumed = False
             self._drag_offset = global_pos - self.frameGeometry().topLeft()
             self._was_dragged = False
+            self.controller.on_pet_drag_started()
         elif event.button() == Qt.MouseButton.RightButton:
             menu = QMenu(self)
             menu.addAction("和 Maidie 对话", self.open_chat)
@@ -193,6 +194,10 @@ class PetWindow(QWidget):
             if outcome == "pending" or self._gesture_consumed:
                 return
             self.move(global_pos - self._drag_offset)
+            geometry = self.frameGeometry()
+            self.controller.on_pet_drag_moved(
+                geometry.x(), geometry.y(), geometry.width(), geometry.height()
+            )
             self._was_dragged = True
             return
         edges = self._resize.hit_test(event.position().toPoint())
@@ -211,6 +216,7 @@ class PetWindow(QWidget):
             return
         was_resizing = bool(self._resize.edges)
         self._resize.end()
+        released_drag = False
         if self._suppress_release_after_double_click:
             self._suppress_release_after_double_click = False
         elif self._gesture_consumed:
@@ -229,6 +235,9 @@ class PetWindow(QWidget):
             self.controller.on_pet_dragged(
                 geometry.x(), geometry.y(), geometry.width(), geometry.height(), drag_dx
             )
+            released_drag = True
+        if not released_drag:
+            self.controller.on_pet_drag_cancelled()
         self._drag_offset = None
         self._press_local = None
         self._drag_start_pos = None
