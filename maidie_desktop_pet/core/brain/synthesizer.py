@@ -25,7 +25,18 @@ class Synthesizer:
                    technical: bool = False) -> dict[str, str]:
         client = self.codex_client if technical else self.chat_client
         prompt = self._prompt(user_input, source, plan, tool_data, memory_context)
-        if self.should_use_local_tool_response(user_input, tool_data):
+        if source == "clarification":
+            mark(local_response_used=True)
+            normalized = {"text": "你是想让我看当前屏幕吗？", "emotion": "thinking",
+                          "action": "talk", "state": "talking", "source": source}
+        elif plan and plan.get("missing_search_query"):
+            mark(local_response_used=True)
+            normalized = {"text": "主人想让我搜什么呀？", "emotion": "shy",
+                          "action": "talk", "state": "talking", "source": source}
+        elif any(item.get("tool") == "search" and not item.get("ok") for item in tool_data):
+            mark(local_response_used=True)
+            normalized = self._local_fallback(source, tool_data)
+        elif self.should_use_local_tool_response(user_input, tool_data):
             mark(local_response_used=True)
             normalized = self._local_fallback(source, tool_data)
         elif source == "screen" and self._screen_failure(tool_data):
@@ -67,14 +78,36 @@ class Synthesizer:
     def _local_fallback(source: str, tool_data: list[dict[str, Any]]) -> dict[str, str]:
         successful = [item.get("data", {}) for item in tool_data if item.get("ok")]
         if not successful:
+            failed_search = next((item.get("data", {}).get("raw", {}) for item in tool_data
+                                  if item.get("tool") == "search"), {})
             failed_screen = next((item.get("data", {}).get("raw", {}) for item in tool_data
                                   if item.get("tool") == "screen"), {})
+            reason = str(failed_search.get("failure_reason", ""))
+            query = str(failed_search.get("query", ""))
             code = str(failed_screen.get("error_code", ""))
             detail = str(failed_screen.get("error", ""))
-            if code == "ocr_disabled":
+            if reason == "EMPTY_QUERY":
+                text = "主人想让我搜什么呀？"
+            elif reason == "API_KEY_MISSING":
+                text = "搜索功能还没配置好，需要检查 Tavily API Key。"
+            elif reason == "NETWORK_ERROR":
+                text = "搜索工具好像连不上，我等会儿再试。"
+            elif reason == "TIMEOUT":
+                text = "搜索工具等太久啦，稍后我再试一次。"
+            elif reason in {"EMPTY_RESULTS", "LOW_CONFIDENCE_RESULTS"}:
+                text = f"我搜了“{query or '这个内容'}”，但没找到靠谱结果。"
+            elif failed_search:
+                text = "搜索时出了点意外，我已经把原因记进日志啦。"
+            elif code == "ocr_disabled":
                 text = "屏幕 OCR 当前未启用，所以我还读不到屏幕文字；请先在设置中开启屏幕理解。"
             elif code == "no_external_window":
                 text = "当前前台是 Maidie 自己，且没有找到可读取的外部窗口，请先切回题目或报错窗口再试。"
+            elif code == "vision_config_missing":
+                text = "视觉能力还没配置好，需要先设置千问视觉 API Key。"
+            elif code == "vision_capture_failed":
+                text = "我现在没法获取屏幕截图，可能是权限或窗口状态的问题。"
+            elif code == "vision_api_failed":
+                text = "我刚刚看屏幕失败了，可能是网络或模型服务问题，可以稍后再试。"
             elif source == "screen":
                 text = f"屏幕读取失败：{detail or '截图或 OCR 没有返回可用数据'}。"
             else:
@@ -107,6 +140,11 @@ class Synthesizer:
                 tool_data: list[dict[str, Any]], memory_context: str) -> str:
         facts = json.dumps(tool_data, ensure_ascii=False, default=str)
         task = (
+            "你是 Maidie 的推理与回答模块。视觉模型只负责观察，最终答案由你生成。"
+            "不要假装看到视觉结构化结果未提供的内容；信息不足时说明不确定并建议下一步。"
+            "代码报错要解释最可能原因并给修复建议；题目先讲思路再给答案；"
+            "软件界面要给出具体下一步操作。回答具体、可执行，不过度卖萌。"
+            if source == "screen" else
             "只依据下方工具数据回答，不得补全或猜测事实；数据报错或不足就可爱地说暂时没查到。"
             if source != "chat" else "这是纯桌宠聊天，不得声称读取了任何设备或外部事实。"
         )

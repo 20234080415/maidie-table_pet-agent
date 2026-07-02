@@ -43,7 +43,7 @@ class BrainRouter:
             mark(route_intent=str(route.get("intent", "unknown")),
                  route_source=str(route.get("route_source", route.get("source", "unknown"))),
                  route_duration_ms=round((monotonic() - started) * 1000, 3))
-        if intent in {"task", "screen", "code_task", "system_task"}:
+        if intent in {"task", "vision", "screen", "code_task", "system_task"}:
             attention = next((item.get("attention") for item in reversed(context)
                               if isinstance(item, dict) and "attention" in item), None)
             started = monotonic()
@@ -64,6 +64,11 @@ class BrainRouter:
             return result
         started = monotonic()
         try:
+            if intent == "clarification":
+                return self.synthesizer.synthesize(
+                    user_input, "clarification", None, [], self._memory_context(), context,
+                    on_delta,
+                )
             result = self.synthesizer.synthesize(
                 user_input, "chat", None, [], self._memory_context(), context, on_delta,
                 technical=self._is_technical(intent, user_input),
@@ -88,6 +93,7 @@ class BrainRouter:
     @staticmethod
     def _source_for_intent(intent: str) -> str:
         return {
+            "vision": "screen",
             "screen": "screen",
             "code_task": "code_task",
             "system_task": "system_task",

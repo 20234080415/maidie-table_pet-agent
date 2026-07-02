@@ -10,14 +10,15 @@ from core.brain.intent_classifier import IntentClassifier
 class LLMIntentRouter:
     """LLM-first intent gate with regex fallback only for failures."""
 
-    INTENTS = {"chat", "task", "screen", "code_task", "system_task"}
+    INTENTS = {"chat", "task", "vision", "clarification", "code_task", "system_task"}
     PROMPT = """You are the intent router of a desktop AI agent (Maidie).
 
 You must classify user input into one of:
 
 - chat
 - task
-- screen
+- vision
+- clarification
 - code_task
 - system_task
 
@@ -31,8 +32,8 @@ Return ONLY JSON:
 
 Rules:
 - Prefer task when tools are needed
-- Prefer screen when user refers to desktop state
-- Phrases such as "这个题", "这个怎么写", "这个报错", "这里", "屏幕上", or "当前窗口" are screen
+- Prefer vision only when the user explicitly asks to inspect a screen, window, screenshot, or image
+- "帮我看一下" or "这个怎么弄" alone is clarification, never vision
 - Prefer code_task for coding/debug requests
 - Technical documentation, API meaning, and programming knowledge questions are code_task
 - A casual statement of interest (for example "I am interested in CMake") is chat unless it asks a question or requests work
@@ -46,7 +47,9 @@ Rules:
 
     def classify(self, user_input: str, context: list[dict[str, Any]] | None = None) -> str:
         route = self.route(user_input, context)
-        return str(route["intent"])
+        # Keep the legacy classifier API stable while route() exposes the
+        # more precise vision intent and metadata to new callers.
+        return "screen" if route["intent"] == "vision" else str(route["intent"])
 
     def route(self, user_input: str, context: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         deterministic = fast_route(user_input)
@@ -77,10 +80,14 @@ Rules:
         intent = str(result.get("intent", "")).strip()
         if intent not in self.INTENTS:
             raise ValueError(f"invalid intent: {intent!r}")
+        need_vision = intent == "vision"
         return {
             "intent": intent,
             "confidence": self._confidence(result.get("confidence")),
             "reason": str(result.get("reason") or ""),
+            "need_screen": need_vision,
+            "need_vision": need_vision,
+            "permission_required": need_vision,
         }
 
     @classmethod

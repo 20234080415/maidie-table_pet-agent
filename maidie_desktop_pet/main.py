@@ -20,7 +20,7 @@ from core.awareness import AppTracker, ClipboardTracker, IdleDetector, MouseTrac
 from core.awareness.context import AwarenessContext
 from core.proactive import ProactiveEngine, ProactiveRuntime
 from core.tasks import TaskScheduler
-from core.vision import ScreenReader
+from core.vision import ScreenReader, VisionService
 from input.manager import InputManager
 from memory.memory import ConversationMemory
 from ui.window import PetWindow
@@ -56,7 +56,8 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
         MouseTracker(idle_detector), WindowTracker(), AppTracker(), screen_reader, ClipboardTracker()
     )
     tool_registry = ToolRegistry([
-        TimeTool(), WeatherTool(), SearchTool(network_plugin), ScreenTool(awareness),
+        TimeTool(), WeatherTool(), SearchTool(network_plugin),
+        ScreenTool(awareness, VisionService()),
         MemoryTool(memory), system_tool,
     ])
     personality_prompt = config_store.personality_prompt(config)
