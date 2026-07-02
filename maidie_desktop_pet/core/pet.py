@@ -9,7 +9,9 @@ from typing import Any, Callable
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
+from animation.direction_manager import DirectionManager
 from core.behavior import AutonomousBehaviorController, BehaviorKind
+from core.chat.chat_streamer import ChatStreamer
 from core.movement import Bounds, MovementController, Vec2
 from core.state import BehaviorPriority, PetState, StateMachine
 
@@ -26,6 +28,9 @@ class PetController(QObject):
     request_failed = pyqtSignal(str)
     settings_changed = pyqtSignal(object)
     gaze_changed = pyqtSignal(float, float)
+    facing_changed = pyqtSignal(bool)
+    emotion_changed = pyqtSignal(str)
+    sentence_completed = pyqtSignal(str)
     _result_ready = pyqtSignal(object)
     _stream_delta_ready = pyqtSignal(str)
 
@@ -49,11 +54,13 @@ class PetController(QObject):
         self.proactive_runtime = proactive_runtime
         self.state_machine = StateMachine()
         self.movement = MovementController(**(movement_options or {}))
+        self.direction = DirectionManager()
         self.behavior = AutonomousBehaviorController()
         self.bounds = Bounds(0, 0, 1920, 1080)
         self.cursor = Vec2()
         self.cursor_chase = False
         self._busy = False
+        self._pending_response: dict[str, str] | None = None
         self._pending_message = ""
         self._pending_source = "chat"
         self._pending_reaction: str | None = None
@@ -62,6 +69,10 @@ class PetController(QObject):
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="maidie-ai")
         self._result_ready.connect(self._handle_result)
         self._stream_delta_ready.connect(self._handle_stream_delta)
+        self.chat_streamer = ChatStreamer(self)
+        self.chat_streamer.text_ready.connect(self._present_stream_text)
+        self.chat_streamer.sentence_finished.connect(self.sentence_completed)
+        self.chat_streamer.finished.connect(self._complete_stream_response)
         self._last_tick = monotonic()
         self._state_token = 0
         self._proactive_timer = QTimer(self)
@@ -170,8 +181,6 @@ class PetController(QObject):
         return True
 
     def _animation_for_state(self, state: PetState) -> str:
-        if state in (PetState.WALK, PetState.RUN):
-            return f"{state.value}-{self.movement.direction}"
         return {
             PetState.REACTING: "reacting",
             PetState.SLEEPING: "sleeping",
@@ -188,6 +197,10 @@ class PetController(QObject):
     ) -> None:
         self.movement.stop()
         self.sync_geometry(x, y, width, height)
+        previous_facing = self.direction.facing_right
+        facing_right = self.direction.update_direction(drag_dx)
+        if facing_right != previous_facing:
+            self.facing_changed.emit(facing_right)
         self.behavior.postpone(2.5)
         if drag_dx > 30:
             self._play_action("dizzy-right", force=True)
@@ -263,7 +276,10 @@ class PetController(QObject):
         self._pending_reaction = (
             self.action_registry.match_message(message) if self.action_registry else None
         )
+        self._pending_response = None
+        self.chat_streamer.start()
         self.stream_started.emit({"source": self._pending_source})
+        self.emotion_changed.emit("thinking")
         self.movement.stop()
         target_state = PetState.REMINDING if proactive else PetState.THINKING
         target_priority = BehaviorPriority.PROACTIVE if proactive else BehaviorPriority.AI_TALKING
@@ -284,7 +300,18 @@ class PetController(QObject):
         )
 
     def _handle_stream_delta(self, delta: str) -> None:
-        self.message_delta.emit(delta)
+        self.chat_streamer.push_token(delta)
+
+    def _present_stream_text(self, fragment: str) -> None:
+        if self.state != PetState.TALKING:
+            self.set_state(
+                PetState.TALKING,
+                BehaviorPriority.AI_TALKING,
+                force=True,
+                animation="talking",
+            )
+            self.emotion_changed.emit("speaking")
+        self.message_delta.emit(fragment)
 
     def _finish_request(self, future: Any) -> None:
         try:
@@ -294,7 +321,7 @@ class PetController(QObject):
             self._result_ready.emit({"error": str(exc)})
 
     def _handle_result(self, result: dict[str, Any]) -> None:
-        self._busy = False
+        failed = "error" in result
         if "error" in result:
             error_message = str(result["error"])
             result = {
@@ -313,6 +340,18 @@ class PetController(QObject):
             "state": str(result.get("state", "talking")),
             "source": str(result.get("source", "chat")),
         }
+        self._pending_response = response
+        # Offline/tool fallbacks may return one complete value rather than raw
+        # deltas. They still pass through the same sentence and pacing layers.
+        if failed or not self.chat_streamer.received_text:
+            self.chat_streamer.push_token(response["text"])
+        self.chat_streamer.finish()
+
+    def _complete_stream_response(self) -> None:
+        response = self._pending_response
+        if response is None:
+            return
+        self._busy = False
         if self._pending_reaction:
             animation = self._pending_reaction
         elif response["source"] == "codex":
@@ -322,9 +361,22 @@ class PetController(QObject):
         elif response["emotion"] == "sad":
             animation = "failed"
         else:
-            animation = "talking"
+            animation = "idle"
         duration = min(9000, max(2800, len(response["text"]) * 90))
-        self._activate_talking(animation, duration)
+        self.emotion_changed.emit(response["emotion"])
+        if animation == "idle":
+            self.set_state(PetState.IDLE, BehaviorPriority.IDLE, force=True)
+        else:
+            final_state = PetState.THINKING if response["source"] == "codex" else PetState.REACTING
+            self.set_state(
+                final_state,
+                BehaviorPriority.AI_TALKING,
+                850,
+                force=True,
+                animation=animation,
+            )
+            token = self._state_token
+            QTimer.singleShot(900, lambda: self._recover_if_current(token))
         self.message_received.emit(response)
         self.memory.save(self._pending_message, response["text"])
         if (
@@ -342,6 +394,7 @@ class PetController(QObject):
             )
         self._broadcast("on_message", response)
         self._pending_reaction = None
+        self._pending_response = None
 
     def _extract_and_store_memories(self, message: str, response: str) -> None:
         try:
@@ -450,6 +503,10 @@ class PetController(QObject):
 
         old_position = Vec2(self.movement.position.x, self.movement.position.y)
         position = self.movement.tick(dt, self.bounds)
+        previous_facing = self.direction.facing_right
+        facing_right = self.direction.update_direction(position.x - old_position.x)
+        if facing_right != previous_facing:
+            self.facing_changed.emit(facing_right)
         if position.distance_to(old_position) > 0.01:
             self.position_requested.emit(position.x, position.y)
 

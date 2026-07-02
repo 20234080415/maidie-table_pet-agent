@@ -23,6 +23,7 @@ class HatchPetSprite(QLabel):
         self._frame = self.engine.current_frame()
         self._gaze_x = 0.0
         self._gaze_y = 0.0
+        self._facing_right = True
         self._transition_from: QPixmap | None = None
         self._transition_from_scale = 1.0
         self._transition_progress = 1.0
@@ -60,6 +61,12 @@ class HatchPetSprite(QLabel):
         painter = QPainter(canvas)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
+        # Frames are authored facing right. Mirroring happens exactly once,
+        # here at the final rendering boundary.
+        if not self._facing_right:
+            painter.translate(self.width(), 0)
+            painter.scale(-1, 1)
+
         painter.translate(self.width() / 2, self.height() / 2)
         painter.rotate(self._gaze_x * 0.55 if self.engine.animation == "idle" else 0.0)
         painter.translate(-self.width() / 2, -self.height() / 2)
@@ -81,6 +88,13 @@ class HatchPetSprite(QLabel):
             self._draw_frame(painter, render_frame, self.engine.render_scale, 1.0)
         painter.end()
         self.setPixmap(canvas)
+
+    def set_facing_right(self, facing_right: bool) -> None:
+        facing_right = bool(facing_right)
+        if facing_right == self._facing_right:
+            return
+        self._facing_right = facing_right
+        self._render()
 
     def _draw_frame(
         self, painter: QPainter, frame: QPixmap, render_scale: float, opacity: float

@@ -204,31 +204,46 @@ class OpenAICompatibleClient(AIClient):
             ])
         messages.append({"role": "user", "content": prompt})
         chunks: list[str] = []
-        with requests.post(
-            f"{self.base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-            json={
-                "model": self.model,
-                "messages": messages,
-                "temperature": 0.8 if self.source == "chat" else 0.2,
-                "max_tokens": 2048,
-                "stream": True,
-            },
-            timeout=self.timeout,
-            stream=True,
-        ) as response:
-            response.raise_for_status()
-            for line in response.iter_lines(decode_unicode=True):
-                if not line or not line.startswith("data:"):
-                    continue
-                payload = line[5:].strip()
-                if payload == "[DONE]":
-                    break
-                event = json.loads(payload)
-                delta = event.get("choices", [{}])[0].get("delta", {}).get("content")
-                if delta:
-                    chunks.append(delta)
-                    on_delta(delta)
+        request_body = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.8 if self.source == "chat" else 0.2,
+            "max_tokens": 2048,
+            "stream": True,
+            # V4 chat models otherwise may spend the entire token budget in
+            # reasoning_content and never produce visible content.
+            **({"thinking": {"type": "disabled"}} if self.source == "chat" else {}),
+        }
+        for attempt in range(2):
+            try:
+                with requests.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=request_body,
+                    timeout=self.timeout,
+                    stream=True,
+                ) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines(decode_unicode=True):
+                        if not line or not line.startswith("data:"):
+                            continue
+                        payload = line[5:].strip()
+                        if payload == "[DONE]":
+                            break
+                        event = json.loads(payload)
+                        delta = event.get("choices", [{}])[0].get("delta", {}).get("content")
+                        if delta:
+                            chunks.append(delta)
+                            on_delta(delta)
+                break
+            except requests.ConnectionError:
+                # A reset before the first visible delta is safe to replay.
+                # Never retry after output started, which would duplicate text.
+                if chunks or attempt == 1:
+                    raise
         text = "".join(chunks).strip()
         if not text:
             raise RuntimeError("DeepSeek returned an empty streaming response")

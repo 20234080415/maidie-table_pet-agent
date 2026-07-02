@@ -50,10 +50,6 @@ class MovementController:
     def speed(self) -> float:
         return hypot(self.velocity.x, self.velocity.y)
 
-    @property
-    def direction(self) -> str:
-        return "left" if self.velocity.x < 0 else "right"
-
     def sync_geometry(self, x: float, y: float, width: float, height: float) -> None:
         self.position = Vec2(x, y)
         self.window_width = width

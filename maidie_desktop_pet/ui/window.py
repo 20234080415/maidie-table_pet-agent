@@ -4,8 +4,9 @@ from pathlib import Path
 
 from PyQt6.QtCore import QPoint, QRect, Qt, QTimer
 from PyQt6.QtGui import QCursor, QKeyEvent, QMouseEvent, QResizeEvent, QWheelEvent
-from PyQt6.QtWidgets import QMenu, QMessageBox, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QVBoxLayout, QWidget
 
+from core.chat.bubble_controller import BubbleController
 from input.resize import EdgeResizeController
 from input.gesture import PetGestureRecognizer
 from ui.bubble import SpeechBubble
@@ -28,6 +29,11 @@ class PetWindow(QWidget):
         self._press_local: QPoint | None = None
         self._drag_start_pos: QPoint | None = None
         self._was_dragged = False
+        self._pending_click_region: str | None = None
+        self._suppress_release_after_double_click = False
+        self._single_click_timer = QTimer(self)
+        self._single_click_timer.setSingleShot(True)
+        self._single_click_timer.timeout.connect(self._perform_single_click)
         self._resize = EdgeResizeController(self)
         self._gesture = PetGestureRecognizer()
         self._gesture_consumed = False
@@ -50,6 +56,7 @@ class PetWindow(QWidget):
         self.resize(int(options.get("width", 320)), int(options.get("height", 380)))
 
         self.bubble = SpeechBubble(self)
+        self.bubble_controller = BubbleController(self.bubble, self._position_overlays, self)
         self.character = HatchPetSprite(assets_dir / "spritesheet.webp")
         self.chat_input = ChatInput(self)
         self.chat_input.submitted.connect(controller.submit_text)
@@ -68,6 +75,8 @@ class PetWindow(QWidget):
         controller.message_delta.connect(self._append_stream)
         controller.position_requested.connect(self._move_from_controller)
         controller.gaze_changed.connect(self.character.set_gaze)
+        controller.facing_changed.connect(self.character.set_facing_right)
+        self.character.set_facing_right(controller.direction.facing_right)
         self.character.set_animation("idle")
         self._move_to_bottom_right()
         self._position_overlays()
@@ -108,19 +117,13 @@ class PetWindow(QWidget):
         self.move(round(x), round(y))
 
     def _show_reply(self, response: dict) -> None:
-        prefix = "⌘ " if response.get("source") == "codex" else ""
-        self.bubble.show_message(prefix + str(response.get("text", "")))
-        self._position_overlays()
-        self.bubble.raise_()
+        self.bubble_controller.complete_stream(response)
 
     def _start_stream(self, metadata: dict) -> None:
-        self.bubble.begin_stream()
-        self._position_overlays()
+        self.bubble_controller.begin_stream(metadata)
 
     def _append_stream(self, delta: str) -> None:
-        self.bubble.append_stream(delta)
-        self._position_overlays()
-        self.bubble.raise_()
+        self.bubble_controller.append_text(delta)
 
     def open_chat(self) -> None:
         self.controller.on_chat_opened()
@@ -197,18 +200,16 @@ class PetWindow(QWidget):
             return
         was_resizing = bool(self._resize.edges)
         self._resize.end()
-        if self._gesture_consumed:
+        if self._suppress_release_after_double_click:
+            self._suppress_release_after_double_click = False
+        elif self._gesture_consumed:
             pass
         elif self._drag_offset is not None and not self._was_dragged and not was_resizing:
             press_point = self._press_local or event.position().toPoint()
             character_point = self.character.mapFrom(self, press_point)
             region = self.character.interaction_region(character_point)
-            if region == "head":
-                self.controller.on_headpat()
-            elif region == "face":
-                self.controller.on_facepoke()
-            else:
-                self.controller.on_pet_clicked()
+            self._pending_click_region = region
+            self._single_click_timer.start(QApplication.doubleClickInterval() + 20)
         elif self._was_dragged:
             geometry = self.frameGeometry()
             drag_dx = (
@@ -226,7 +227,21 @@ class PetWindow(QWidget):
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            self._single_click_timer.stop()
+            self._pending_click_region = None
+            self._suppress_release_after_double_click = True
             self.open_chat()
+            event.accept()
+
+    def _perform_single_click(self) -> None:
+        region = self._pending_click_region
+        self._pending_click_region = None
+        if region == "head":
+            self.controller.on_headpat()
+        elif region == "face":
+            self.controller.on_facepoke()
+        elif region:
+            self.controller.on_pet_clicked()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):

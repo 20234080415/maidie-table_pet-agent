@@ -24,10 +24,10 @@ class AtlasAnimationEngine(QObject, AnimationBackend):
         "happy": (4, 5, 135, 1.30),
         "reacting": (3, 4, 180, 1.0),
         "sleeping": (0, 6, 420, 1.0),
-        "walk-right": (1, 8, 185, 1.0),
-        "walk-left": (2, 8, 185, 1.0),
-        "run-right": (1, 8, 95, 1.0),
-        "run-left": (2, 8, 95, 1.0),
+        # Row 1 is the canonical right-facing source. The sprite renderer is
+        # the only place that mirrors frames for left-facing movement.
+        "walk": (1, 8, 185, 1.0),
+        "run": (1, 8, 95, 1.0),
         "waiting": (6, 6, 200, 1.0),
         "review": (8, 6, 190, 1.0),
         "failed": (5, 8, 210, 1.0),

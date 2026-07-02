@@ -4,6 +4,7 @@ import unittest
 
 from ai.client import AIClient, normalize_response
 from ai.router import AIRouter
+from animation.direction_manager import DirectionManager
 from core.movement import Bounds, MovementController, Vec2
 from core.state import BehaviorPriority, PetState, StateMachine
 
@@ -47,6 +48,24 @@ class MovementTests(unittest.TestCase):
             motion.tick(0.05, bounds)
         self.assertLessEqual(motion.position.x, 960)
         self.assertLessEqual(motion.position.y, 340)
+
+
+class DirectionManagerTests(unittest.TestCase):
+    def test_defaults_to_right_and_tracks_horizontal_motion(self):
+        direction = DirectionManager()
+        self.assertTrue(direction.facing_right)
+        self.assertEqual(direction.get_scale(), 1)
+
+        self.assertFalse(direction.update_direction(-1))
+        self.assertEqual(direction.get_scale(), -1)
+        self.assertTrue(direction.update_direction(1))
+        self.assertEqual(direction.get_scale(), 1)
+
+    def test_stopping_preserves_last_facing(self):
+        direction = DirectionManager()
+        direction.update_direction(-10)
+        self.assertFalse(direction.update_direction(0))
+        self.assertEqual(direction.get_scale(), -1)
 
 
 class RouterTests(unittest.TestCase):
