@@ -66,12 +66,21 @@ class BrainExecutor:
                     kind=str(safe_params.get("kind", "long_term")),
                     limit=int(safe_params.get("limit", 20)),
                 )
+            if name == "search":
+                return tool.run(
+                    str(safe_params.get("query") or ""),
+                    raw_user_text=user_input,
+                    query_source=str(safe_params.get("query_source") or "explicit_user_text"),
+                )
             if name == "screen":
                 return tool.run(
                     str(safe_params.get("query") or user_input),
                     scope=str(safe_params.get("scope") or "active_window"),
                     reuse_session=bool(safe_params.get("reuse_session", False)),
                     force_refresh=bool(safe_params.get("force_refresh", False)),
+                    selected_rect=(tuple(safe_params["selected_rect"])
+                                   if isinstance(safe_params.get("selected_rect"), (list, tuple))
+                                   and len(safe_params["selected_rect"]) == 4 else None),
                 )
             return tool.run(str(safe_params.get("query") or user_input))
         except Exception as exc:

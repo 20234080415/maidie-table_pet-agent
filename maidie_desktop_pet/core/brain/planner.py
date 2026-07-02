@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
 from core.brain.fast_route import is_simple_time_query, is_weather_query
+from core.brain.search_query import SearchQueryResolver
 
 
 class BrainPlanner:
@@ -17,8 +19,9 @@ class BrainPlanner:
     )
 
     def plan_for_intent(self, user_input: str, intent: str, memory: Any = None,
-                        attention: dict[str, Any] | None = None) -> dict[str, Any]:
-        if intent == "screen":
+                        attention: dict[str, Any] | None = None,
+                        clipboard_text: str = "") -> dict[str, Any]:
+        if intent in {"screen", "vision"}:
             plan = self.screen_plan(user_input)
             return self._with_attention(plan, attention)
         if intent == "code_task":
@@ -27,7 +30,7 @@ class BrainPlanner:
         if intent == "system_task":
             plan = self.system_plan(user_input)
             return self._with_attention(plan, attention)
-        return self._with_attention(self.plan(user_input, memory), attention)
+        return self._with_attention(self.plan(user_input, memory, clipboard_text), attention)
 
     @staticmethod
     def _with_attention(plan: dict[str, Any], attention: dict[str, Any] | None) -> dict[str, Any]:
@@ -35,7 +38,8 @@ class BrainPlanner:
             return {**plan, "attention": dict(attention)}
         return plan
 
-    def plan(self, user_input: str, memory: Any = None) -> dict[str, Any]:
+    def plan(self, user_input: str, memory: Any = None,
+             clipboard_text: str = "") -> dict[str, Any]:
         text = str(user_input).strip()
         steps: list[dict[str, Any]] = []
         needs_weather = (is_weather_query(text)
@@ -46,8 +50,19 @@ class BrainPlanner:
         if needs_time:
             steps.append(self._step("time", "读取本地时间", {"query": text}))
         if (not needs_weather and not needs_time
-                and re.search(r"查资料|查一下|查询|搜索|最新|新闻|search|look up|latest", text, re.I)):
-            steps.append(self._step("search", "读取检索资料", {"query": text}))
+                and SearchQueryResolver.SEARCH_INTENT.search(text)):
+            resolved = SearchQueryResolver().resolve(text, memory, clipboard_text)
+            if not resolved.query:
+                logging.getLogger(__name__).info(
+                    "search_debug raw_user_text=%r resolved_search_query='' "
+                    "query_source=missing selected_tool=search tavily_result_count=0 "
+                    "failure_reason=EMPTY_QUERY", text,
+                )
+                return {"goal": text, "steps": [], "missing_search_query": True,
+                        "query_source": "missing"}
+            steps.append(self._step("search", "读取检索资料", {
+                "query": resolved.query, "query_source": resolved.source,
+            }))
         if self.DECISION.search(text):
             steps.append(self._step("memory", "读取相关偏好", {"limit": 20}))
             if len(steps) < 2:

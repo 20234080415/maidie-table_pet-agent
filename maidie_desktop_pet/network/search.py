@@ -13,8 +13,11 @@ class SearchService:
         self.client = NetworkClient(timeout)
 
     def search(self, query: str) -> dict:
+        query = str(query).strip()
+        if not query:
+            return NetworkResult(error="搜索内容为空。", failure_reason="EMPTY_QUERY").to_dict()
         if not self.api_key:
-            return NetworkResult(error="尚未配置搜索 API Key。").to_dict()
+            return NetworkResult(error="尚未配置搜索 API Key。", failure_reason="API_KEY_MISSING").to_dict()
         if self.provider != "tavily":
             return NetworkResult(error=f"暂不支持搜索服务：{self.provider}").to_dict()
         data, error = self.client.post_json(
@@ -28,7 +31,8 @@ class SearchService:
             },
         )
         if error:
-            return NetworkResult(error=error).to_dict()
+            reason = "TIMEOUT" if "超时" in error else "NETWORK_ERROR"
+            return NetworkResult(error=error, failure_reason=reason).to_dict()
         try:
             items = data.get("results", []) if isinstance(data, dict) else []
             sources = [
@@ -40,16 +44,26 @@ class SearchService:
                 for item in items[:5]
                 if isinstance(item, dict) and item.get("url")
             ]
+            scores = [float(item.get("score", 1.0)) for item in items
+                      if isinstance(item, dict) and item.get("url")]
             summary = str(data.get("answer", "")).strip() if isinstance(data, dict) else ""
             if not summary:
                 summary = "\n".join(source["snippet"] for source in sources if source["snippet"])
             if not summary:
-                return NetworkResult(error="没有找到可用的联网结果。").to_dict()
+                return NetworkResult(error="没有找到可用的联网结果。",
+                                     failure_reason="EMPTY_RESULTS",
+                                     result_count=len(sources)).to_dict()
+            if sources and scores and max(scores) < 0.2:
+                return NetworkResult(error="搜索结果可信度不足。",
+                                     failure_reason="LOW_CONFIDENCE_RESULTS",
+                                     result_count=len(sources), sources=sources).to_dict()
             return NetworkResult(
                 ok=True,
                 title=f"“{query}”的联网查询结果",
                 summary=summary[:4000],
                 sources=sources,
+                result_count=len(sources),
             ).to_dict()
         except (AttributeError, TypeError, ValueError) as exc:
-            return NetworkResult(error=f"无法解析搜索结果：{exc}").to_dict()
+            return NetworkResult(error=f"无法解析搜索结果：{exc}",
+                                 failure_reason="UNKNOWN_ERROR").to_dict()

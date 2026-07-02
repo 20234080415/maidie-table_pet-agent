@@ -42,6 +42,9 @@ VISION_DEFAULTS = {
     "max_width": 1280,
     "jpeg_quality": 85,
     "cache_ttl_seconds": 5,
+    "default_scope": "active_window",
+    "cursor_region_width": 1000,
+    "cursor_region_height": 800,
 }
 FENCE_DEFAULTS = {"show_overlay": True}
 
@@ -104,6 +107,9 @@ class ConfigStore:
             "vision_max_width": int(vision.get("max_width", 1280)),
             "vision_jpeg_quality": int(vision.get("jpeg_quality", 85)),
             "vision_cache_ttl_seconds": int(vision.get("cache_ttl_seconds", 5)),
+            "vision_default_scope": str(vision.get("default_scope", "active_window")),
+            "vision_cursor_region_width": int(vision.get("cursor_region_width", 1000)),
+            "vision_cursor_region_height": int(vision.get("cursor_region_height", 800)),
         }
 
     def update_user_settings(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -147,6 +153,10 @@ class ConfigStore:
             vision["max_width"] = max(320, min(4096, int(values.get("vision_max_width", vision.get("max_width", 1280)))))
             vision["jpeg_quality"] = max(40, min(100, int(values.get("vision_jpeg_quality", vision.get("jpeg_quality", 85)))))
             vision["cache_ttl_seconds"] = max(0, min(60, int(values.get("vision_cache_ttl_seconds", vision.get("cache_ttl_seconds", 5)))))
+            default_scope = str(values.get("vision_default_scope", vision.get("default_scope", "active_window")))
+            vision["default_scope"] = default_scope if default_scope in {"active_window", "fullscreen", "cursor_region"} else "active_window"
+            vision["cursor_region_width"] = max(200, min(4096, int(values.get("vision_cursor_region_width", vision.get("cursor_region_width", 1000)))))
+            vision["cursor_region_height"] = max(200, min(2160, int(values.get("vision_cursor_region_height", vision.get("cursor_region_height", 800)))))
             self._atomic_write(config)
             return deepcopy(config)
 

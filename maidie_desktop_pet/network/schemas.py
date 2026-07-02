@@ -12,6 +12,8 @@ class NetworkResult:
     summary: str = ""
     sources: list[dict[str, str]] = field(default_factory=list)
     error: str = ""
+    failure_reason: str = ""
+    result_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

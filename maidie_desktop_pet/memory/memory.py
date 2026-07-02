@@ -26,8 +26,16 @@ class ConversationMemory:
         self.path = path
         self.limit = min(20, max(1, int(limit)))
         self._lock = RLock()
+        self._last_search_query = ""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
+
+    def set_last_search_query(self, query: str) -> None:
+        """Keep retry context in memory only; it is not persisted as chat."""
+        self._last_search_query = str(query).strip()
+
+    def get_last_search_query(self) -> str:
+        return self._last_search_query
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:

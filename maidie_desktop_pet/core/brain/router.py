@@ -12,7 +12,7 @@ from core.brain.planner import BrainPlanner
 from core.brain.synthesizer import Synthesizer
 from core.performance import mark
 from core.vision.vision_session import VisionSession
-from core.vision.intent_rules import vision_scope_for
+from core.vision.intent_rules import detect_vision_scope
 
 
 class BrainRouter:
@@ -41,6 +41,8 @@ class BrainRouter:
         self.executor = executor or BrainExecutor(tool_registry)
         self.synthesizer = synthesizer or Synthesizer(chat_client, codex_client)
         self._vision_clarification_pending = False
+        self._vision_clarification_created_at = 0.0
+        self._vision_pending_default_scope = "active_window"
         self.logger = logging.getLogger(__name__)
 
     def classify(self, user_input: str) -> str:
@@ -65,6 +67,9 @@ class BrainRouter:
                                    "active_window", total_started, 0.0)
             return result
 
+        if (self._vision_clarification_pending and
+                monotonic() - self._vision_clarification_created_at > 60):
+            self._vision_clarification_pending = False
         confirmed = (self._vision_clarification_pending and
                      bool(self.VISION_CONFIRM.fullmatch(user_input.strip())))
         started = monotonic()
@@ -96,6 +101,11 @@ class BrainRouter:
                      "source": "vision_refresh", "vision_scope": session.scope}
         if intent == "clarification":
             self._vision_clarification_pending = True
+            self._vision_clarification_created_at = monotonic()
+            service = self._vision_service()
+            self._vision_pending_default_scope = str(
+                getattr(service, "default_scope", "active_window")
+            )
         else:
             self._vision_clarification_pending = False
         if intent in {"task", "vision", "screen", "code_task", "system_task"}:
@@ -105,16 +115,23 @@ class BrainRouter:
             try:
                 plan = self.planner.plan_for_intent(user_input, intent, self.memory, attention)
                 if intent in {"vision", "screen"}:
+                    service = self._vision_service()
+                    configured_default = str(getattr(service, "default_scope", "active_window"))
+                    default_scope = (self._vision_pending_default_scope if confirmed else
+                                     str(route.get("vision_scope") or configured_default))
                     scope = (session.scope if follow_up and session is not None else
-                             vision_scope_for(
-                                 user_input, str(route.get("vision_scope") or "active_window")
-                             ))
+                             detect_vision_scope(user_input, default_scope).value)
+                    selected_rect = next((item.get("vision_selected_rect")
+                                          for item in reversed(context)
+                                          if isinstance(item, dict)
+                                          and item.get("vision_selected_rect")), None)
                     force_refresh = bool(self.VISION_REFRESH.search(user_input))
                     for step in plan.get("steps", []):
                         if isinstance(step, dict) and step.get("tool") == "screen":
                             params = step.setdefault("params", {})
                             params.update({"scope": scope, "reuse_session": follow_up,
-                                           "force_refresh": force_refresh})
+                                           "force_refresh": force_refresh,
+                                           "selected_rect": selected_rect})
             finally:
                 mark(plan_duration_ms=round((monotonic() - started) * 1000, 3))
             executions = self.executor.execute(plan, user_input)

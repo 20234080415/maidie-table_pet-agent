@@ -50,6 +50,7 @@ class VisionInteractionTests(unittest.TestCase):
         self.capture = Mock()
         self.capture.capture_active_window.return_value = Image.new("RGB", (40, 20))
         self.capture.capture_cursor_region.return_value = Image.new("RGB", (30, 20))
+        self.capture.capture_region.return_value = Image.new("RGB", (30, 20))
         self.vl_client = Mock()
         self.vl_client.analyze_image.return_value = VisionContext(
             screen_summary="IDE traceback", visible_text="ValueError",
@@ -70,7 +71,7 @@ class VisionInteractionTests(unittest.TestCase):
 
     def test_ambiguous_request_is_clarification(self):
         result = self.router.route("这个怎么弄")
-        self.assertIn("当前屏幕", result["text"])
+        self.assertIn("看屏幕", result["text"])
         self.capture.capture_active_window.assert_not_called()
 
     def test_confirmation_after_clarification_enters_vision(self):
@@ -80,12 +81,12 @@ class VisionInteractionTests(unittest.TestCase):
 
     def test_cursor_phrase_selects_cursor_region(self):
         self.router.route("看鼠标这块")
-        self.capture.capture_cursor_region.assert_called_once_with()
+        self.capture.capture_cursor_region.assert_called_once_with(1000, 800)
         self.capture.capture_active_window.assert_not_called()
 
     def test_natural_cursor_sentence_selects_cursor_region(self):
         self.router.route("帮我看一下这个数学题怎么写就在我鼠标指着这一块")
-        self.capture.capture_cursor_region.assert_called_once_with()
+        self.capture.capture_cursor_region.assert_called_once_with(1000, 800)
         self.capture.capture_active_window.assert_not_called()
 
     def test_refresh_forces_new_capture(self):
@@ -93,6 +94,12 @@ class VisionInteractionTests(unittest.TestCase):
         self.router.route("重新看一下屏幕")
         self.assertEqual(self.capture.capture_active_window.call_count, 2)
         self.assertEqual(self.vl_client.analyze_image.call_count, 2)
+
+    def test_selected_region_uses_context_rectangle(self):
+        self.router.route(
+            "我框选一下给你看", [{"vision_selected_rect": (10, 20, 300, 200)}]
+        )
+        self.capture.capture_region.assert_called_once_with(10, 20, 300, 200)
 
     def test_clear_phrase_clears_session(self):
         self.router.route("你看看我现在屏幕")
@@ -157,7 +164,7 @@ class CursorRegionTests(unittest.TestCase):
         )
         service.capture_and_analyze("看鼠标这块", scope="cursor_region")
         sleeper.assert_called_once_with(3.0)
-        capture.capture_cursor_region.assert_called_once_with()
+        capture.capture_cursor_region.assert_called_once_with(1000, 800)
 
     def test_cursor_request_explains_the_delay(self):
         pool = ThinkingFeedbackPool(chooser=lambda values: values[0])

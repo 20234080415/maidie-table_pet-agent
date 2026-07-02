@@ -292,6 +292,26 @@ class SettingsDialog(QDialog):
         self.vision_cache_ttl.setValue(
             self.settings.get("vision_cache_ttl_seconds", 5)
         )
+        self.vision_default_scope = QComboBox()
+        self.vision_default_scope.addItem("当前窗口", "active_window")
+        self.vision_default_scope.addItem("全屏", "fullscreen")
+        self.vision_default_scope.addItem("鼠标附近", "cursor_region")
+        scope_index = self.vision_default_scope.findData(
+            self.settings.get("vision_default_scope", "active_window")
+        )
+        self.vision_default_scope.setCurrentIndex(max(0, scope_index))
+        self.vision_cursor_width = QSpinBox()
+        self.vision_cursor_width.setRange(200, 4096)
+        self.vision_cursor_width.setSuffix(" px")
+        self.vision_cursor_width.setValue(
+            self.settings.get("vision_cursor_region_width", 1000)
+        )
+        self.vision_cursor_height = QSpinBox()
+        self.vision_cursor_height.setRange(200, 2160)
+        self.vision_cursor_height.setSuffix(" px")
+        self.vision_cursor_height.setValue(
+            self.settings.get("vision_cursor_region_height", 800)
+        )
         note = QLabel(
             "只有你明确要求看屏幕、窗口或图片时才会截图并发送给千问视觉；"
             "截图仅在内存中处理，不会永久保存。环境变量配置优先于这里的设置。"
@@ -304,6 +324,14 @@ class SettingsDialog(QDialog):
         layout.addRow("图片最大宽度", self.vision_max_width)
         layout.addRow("JPEG 质量", self.vision_jpeg_quality)
         layout.addRow("短缓存", self.vision_cache_ttl)
+        layout.addRow("默认截图范围", self.vision_default_scope)
+        layout.addRow("鼠标区域宽度", self.vision_cursor_width)
+        layout.addRow("鼠标区域高度", self.vision_cursor_height)
+        scope_note = QLabel(
+            "建议使用当前窗口。全屏信息更完整但隐私更多；鼠标附近适合按钮和局部内容。"
+        )
+        scope_note.setWordWrap(True)
+        layout.addRow("", scope_note)
         layout.addRow("", note)
         return page
 
@@ -333,6 +361,9 @@ class SettingsDialog(QDialog):
             "vision_max_width": self.vision_max_width.value(),
             "vision_jpeg_quality": self.vision_jpeg_quality.value(),
             "vision_cache_ttl_seconds": self.vision_cache_ttl.value(),
+            "vision_default_scope": self.vision_default_scope.currentData(),
+            "vision_cursor_region_width": self.vision_cursor_width.value(),
+            "vision_cursor_region_height": self.vision_cursor_height.value(),
         }
         if not values["base_url"] or not values["chat_model"] or not values["technical_model"]:
             return

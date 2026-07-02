@@ -3,7 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from core.vision.intent_rules import is_cursor_region_request
+from core.vision.intent_rules import (VisionScope, detect_vision_scope,
+                                      is_cursor_region_request, is_explicit_scope_request)
 
 
 TIME = re.compile(r"现在几点|今天几号|今天星期几|当前时间|现在时间|\b(?:time|date)\b", re.I)
@@ -15,7 +16,7 @@ SCREEN = re.compile(
     r"你能.*(?:看到|看见).*(?:屏幕|桌面)", re.I,
 )
 AMBIGUOUS_VISION = re.compile(
-    r"^(?:这个怎么弄|这是啥情况|帮我看看|帮我看一下|看一下|这个什么意思|这个题怎么写|这题怎么做)"
+    r"^(?:这个怎么弄|这是啥情况|帮我看看|帮我看一下|看一下|这个什么意思|这个题怎么写|这题怎么做|怎么办)"
     r"[？?！!。.\s]*$", re.I,
 )
 TECHNICAL = re.compile(r"代码|编译|linux|cmake|makefile|python|api|报错", re.I)
@@ -40,6 +41,10 @@ def is_simple_weather_query(text: str) -> bool:
 
 def fast_route(text: str) -> dict[str, Any] | None:
     value = str(text).strip()
+    scope = detect_vision_scope(value)
+    if scope in {VisionScope.SELECTED_REGION, VisionScope.FULLSCREEN} and is_explicit_scope_request(value):
+        return _route("vision", f"explicit {scope.value} request", need_screen=True,
+                      need_vision=True, vision_scope=scope.value)
     if is_cursor_region_request(value):
         return _route("vision", "explicit cursor-region request", need_screen=True,
                       need_vision=True, vision_scope="cursor_region")
@@ -62,7 +67,7 @@ def fast_route(text: str) -> dict[str, Any] | None:
 
 
 def _route(intent: str, reason: str, *, need_screen: bool = False,
-           need_vision: bool = False, vision_scope: str = "active_window") -> dict[str, Any]:
+           need_vision: bool = False, vision_scope: str = "") -> dict[str, Any]:
     return {"intent": intent, "confidence": 1.0, "route_source": "fast_rule",
             "source": "fast_rule", "reason": reason, "need_screen": need_screen,
             "need_vision": need_vision, "permission_required": need_screen,

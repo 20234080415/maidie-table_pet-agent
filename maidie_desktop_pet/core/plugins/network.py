@@ -34,8 +34,11 @@ class NetworkPlugin(Plugin):
 
     def handle(self, message: str) -> dict:
         if not self.enabled:
-            return NetworkResult(error="联网查询未开启。").to_dict()
+            return NetworkResult(error="联网查询未开启。",
+                                 failure_reason=("API_KEY_MISSING" if not self.search_api_key
+                                                 else "UNKNOWN_ERROR")).to_dict()
         try:
             return self.search_service.search(message.strip())
         except Exception as exc:
-            return NetworkResult(error=f"联网查询暂时不可用：{exc}").to_dict()
+            return NetworkResult(error=f"联网查询暂时不可用：{exc}",
+                                 failure_reason="UNKNOWN_ERROR").to_dict()

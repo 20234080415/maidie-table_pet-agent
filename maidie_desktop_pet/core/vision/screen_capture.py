@@ -65,6 +65,29 @@ class ScreenCapture:
         except Exception:
             return self.capture_active_window()
 
+    def capture_region(self, x: int, y: int, width: int,
+                       height: int) -> Image.Image:
+        if width < 20 or height < 20:
+            raise VisionCaptureError("框选区域太小")
+        try:
+            left, top, right, bottom = self._bounds_provider()
+            crop_left = max(left, min(int(x), right - 1))
+            crop_top = max(top, min(int(y), bottom - 1))
+            crop_right = min(right, max(crop_left + 1, int(x) + int(width)))
+            crop_bottom = min(bottom, max(crop_top + 1, int(y) + int(height)))
+            if crop_right - crop_left < 20 or crop_bottom - crop_top < 20:
+                raise VisionCaptureError("框选区域超出有效屏幕范围")
+            image = self._grabber(
+                bbox=(crop_left, crop_top, crop_right, crop_bottom), all_screens=True
+            )
+            if not isinstance(image, Image.Image):
+                raise TypeError("capture returned no image")
+            return image
+        except VisionCaptureError:
+            raise
+        except Exception as exc:
+            raise VisionCaptureError("无法截取框选区域") from exc
+
     @staticmethod
     def _cursor_position() -> tuple[int, int]:
         if sys.platform != "win32":

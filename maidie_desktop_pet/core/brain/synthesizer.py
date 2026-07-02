@@ -27,7 +27,7 @@ class Synthesizer:
         prompt = self._prompt(user_input, source, plan, tool_data, memory_context)
         if source == "clarification":
             mark(local_response_used=True)
-            normalized = {"text": "你是想让我看一下当前屏幕吗？如果是的话，我可以截取当前窗口帮你分析。",
+            normalized = {"text": "你是想让我看屏幕吗？可以说‘看当前窗口’、‘看全屏’、‘看鼠标这块’，或者‘我框选一下’。",
                           "emotion": "thinking",
                           "action": "talk", "state": "talking", "source": source}
         elif source == "vision_cleared":

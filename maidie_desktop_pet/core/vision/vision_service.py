@@ -6,6 +6,7 @@ from time import monotonic, sleep
 from typing import Callable
 
 from core.vision.image_preprocess import preprocess_for_vl
+from core.vision.errors import VisionCaptureError
 from core.vision.qwen_vl_client import QwenVLClient
 from core.vision.screen_capture import ScreenCapture
 from core.vision.vision_context import VisionContext
@@ -19,7 +20,10 @@ class VisionService:
                  clock: Callable[[], float] = monotonic,
                  session: VisionSession | None = None,
                  cursor_delay_seconds: float = 3.0,
-                 sleeper: Callable[[float], None] = sleep) -> None:
+                 sleeper: Callable[[float], None] = sleep,
+                 default_scope: str = "active_window",
+                 cursor_region_width: int = 1000,
+                 cursor_region_height: int = 800) -> None:
         self.capture = capture or ScreenCapture()
         self.client = client or QwenVLClient()
         self.max_width = max_width or self._env_int("VISION_MAX_WIDTH", 1280)
@@ -33,6 +37,9 @@ class VisionService:
         self.session = session or VisionSession(clock)
         self.cursor_delay_seconds = max(0.0, float(cursor_delay_seconds))
         self._sleeper = sleeper
+        self.default_scope = default_scope
+        self.cursor_region_width = cursor_region_width
+        self.cursor_region_height = cursor_region_height
         self.logger = logging.getLogger(__name__)
 
     def reconfigure(self, settings: dict[str, object]) -> None:
@@ -56,13 +63,24 @@ class VisionService:
         self.cache_ttl_seconds = float(self._setting_int(
             settings, "cache_ttl_seconds", "VISION_CACHE_TTL_SECONDS", 5
         ))
+        self.default_scope = str(settings.get("default_scope", "active_window"))
+        if self.default_scope not in {"active_window", "fullscreen", "cursor_region"}:
+            self.default_scope = "active_window"
+        self.cursor_region_width = self._setting_int(
+            settings, "cursor_region_width", "VISION_CURSOR_REGION_WIDTH", 1000
+        )
+        self.cursor_region_height = self._setting_int(
+            settings, "cursor_region_height", "VISION_CURSOR_REGION_HEIGHT", 800
+        )
         self._cached_context = None
         self._cached_at = float("-inf")
 
     def capture_and_analyze(self, user_question: str, scope: str = "active_window",
-                            force_refresh: bool = False) -> VisionContext:
+                            force_refresh: bool = False,
+                            selected_rect: tuple[int, int, int, int] | None = None) -> VisionContext:
         now = self._clock()
-        if (not force_refresh and self._cached_context is not None and self._cached_scope == scope and
+        cache_allowed = scope != "selected_region"
+        if (cache_allowed and not force_refresh and self._cached_context is not None and self._cached_scope == scope and
                 now - self._cached_at <= self.cache_ttl_seconds):
             self.logger.debug("vision scope=%s cache_hit=true task_type=%s confidence=%.3f",
                               scope, self._cached_context.task_type,
@@ -70,6 +88,7 @@ class VisionService:
             self.session.update(self._cached_context, user_question, scope=scope)
             return self._cached_context
 
+        capture_started = self._clock()
         if scope == "fullscreen":
             image = self.capture.capture_fullscreen()
         elif scope == "cursor_region":
@@ -77,9 +96,16 @@ class VisionService:
                               self.cursor_delay_seconds)
             if self.cursor_delay_seconds:
                 self._sleeper(self.cursor_delay_seconds)
-            image = self.capture.capture_cursor_region()
+            image = self.capture.capture_cursor_region(
+                self.cursor_region_width, self.cursor_region_height
+            )
+        elif scope == "selected_region":
+            if selected_rect is None:
+                raise VisionCaptureError("没有收到有效的框选区域")
+            image = self.capture.capture_region(*selected_rect)
         else:
             image = self.capture.capture_active_window()
+        capture_latency = self._clock() - capture_started
         original_size = image.size
         data_url, image_size, jpeg_size = preprocess_for_vl(
             image, self.max_width, self.jpeg_quality
@@ -94,13 +120,17 @@ class VisionService:
             )
             raise
         qwen_latency = self._clock() - qwen_started
-        self._cached_context, self._cached_at, self._cached_scope = context, now, scope
+        if cache_allowed:
+            self._cached_context, self._cached_at, self._cached_scope = context, now, scope
         self.session.update(context, user_question, scope=scope)
         self.logger.debug(
             "vision scope=%s original_size=%s compressed_size=%s jpeg_bytes=%d "
-            "task_type=%s confidence=%.3f cache_hit=false qwen_latency=%.3f",
+            "task_type=%s confidence=%.3f cache_hit=false capture_latency=%.3f "
+            "qwen_latency=%.3f selected_region_rect=%s cursor_region_size=%s",
             scope, original_size, image_size, jpeg_size, context.task_type, context.confidence,
-            qwen_latency,
+            capture_latency, qwen_latency, selected_rect,
+            ((self.cursor_region_width, self.cursor_region_height)
+             if scope == "cursor_region" else None),
         )
         return context
 

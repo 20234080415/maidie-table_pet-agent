@@ -15,6 +15,7 @@ from ui.dialogs import RecentChatsDialog, SettingsDialog
 from ui.fence_overlay import FenceOverlayWindow
 from ui.resize_handle import SubtleResizeHandle
 from ui.sprite import HatchPetSprite
+from core.vision.region_selector import RegionSelector
 
 
 class PetWindow(QWidget):
@@ -40,6 +41,9 @@ class PetWindow(QWidget):
         self._gesture_consumed = False
         self._positioning_overlays = False
         self._dialog = None
+        self._region_selector: RegionSelector | None = None
+        self._selection_message = ""
+        self._opacity_before_selection = self.windowOpacity()
         self.confirmation_broker = confirmation_broker
         self.fence_overlay = FenceOverlayWindow() if (fence_options or {}).get(
             "show_overlay", True
@@ -85,11 +89,45 @@ class PetWindow(QWidget):
         controller.gaze_changed.connect(self.character.set_gaze)
         controller.facing_changed.connect(self.character.set_facing_right)
         controller.fence_changed.connect(self._update_fence_overlay)
+        controller.region_selection_requested.connect(self._start_region_selection)
         self.character.set_facing_right(controller.direction.facing_right)
         self.character.set_animation("idle")
         self._move_to_bottom_right()
         self._position_overlays()
         self.resize_handle.raise_()
+
+    def _start_region_selection(self, message: str) -> None:
+        if self._region_selector is not None:
+            return
+        self._selection_message = message
+        self._opacity_before_selection = self.windowOpacity()
+        self.setWindowOpacity(0.15)
+        selector = RegionSelector()
+        selector.region_selected.connect(self._finish_region_selection)
+        selector.selection_cancelled.connect(self._cancel_region_selection)
+        self._region_selector = selector
+        selector.begin()
+
+    def _finish_region_selection(self, rect: QRect) -> None:
+        message = self._selection_message
+        coordinates = (rect.x(), rect.y(), rect.width(), rect.height())
+        self._restore_after_region_selection()
+        self._selection_message = ""
+        # Let the Windows compositor remove the overlay before the worker captures.
+        QTimer.singleShot(
+            120, lambda: self.controller.complete_region_selection(message, coordinates)
+        )
+
+    def _cancel_region_selection(self) -> None:
+        self._restore_after_region_selection()
+        self._selection_message = ""
+        self.controller.cancel_region_selection()
+
+    def _restore_after_region_selection(self) -> None:
+        self.setWindowOpacity(self._opacity_before_selection)
+        if self._region_selector is not None:
+            self._region_selector.deleteLater()
+            self._region_selector = None
 
     def _update_fence_overlay(self, rect) -> None:
         if self.fence_overlay is None:

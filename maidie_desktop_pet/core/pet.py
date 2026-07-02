@@ -19,6 +19,7 @@ from core.fence import FenceController
 from core.movement import Bounds, MovementController, Vec2
 from core.session import AISessionCoordinator
 from core.state import BehaviorPriority, PetState, StateMachine
+from core.vision.intent_rules import VisionScope, detect_vision_scope
 
 
 class PetController(QObject):
@@ -38,6 +39,7 @@ class PetController(QObject):
     sentence_completed = pyqtSignal(str)
     local_message_requested = pyqtSignal(str)
     fence_changed = pyqtSignal(object)
+    region_selection_requested = pyqtSignal(str)
 
     def __init__(
         self,
@@ -75,6 +77,7 @@ class PetController(QObject):
         self.cursor_chase = False
         self._listeners: dict[str, list[Callable[..., None]]] = defaultdict(list)
         self._plugins: list[Any] = []
+        self._selected_region_rect: tuple[int, int, int, int] | None = None
         self._user_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="maidie-user")
         self._proactive_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="maidie-proactive")
         self._memory_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="maidie-memory")
@@ -484,7 +487,21 @@ class PetController(QObject):
             )
 
     def submit_text(self, message: str, proactive: bool = False) -> None:
+        if not proactive and detect_vision_scope(message) is VisionScope.SELECTED_REGION:
+            if not self.ai_session.busy:
+                self.local_message_requested.emit("好，你框一下要我看的地方就行。")
+                self.region_selection_requested.emit(message)
+            return
         self.ai_session.submit(message, proactive)
+
+    def complete_region_selection(self, message: str,
+                                  rect: tuple[int, int, int, int]) -> None:
+        self._selected_region_rect = rect
+        self.ai_session.submit(message, False)
+
+    def cancel_region_selection(self) -> None:
+        self._selected_region_rect = None
+        self.local_message_requested.emit("好，那这次我就不看屏幕啦。")
 
     def _prepare_ai_request(self, message: str, proactive: bool) -> tuple[list[dict[str, Any]], str | None]:
         # Intent routing performs an API request. Keep it inside the worker's
@@ -502,6 +519,19 @@ class PetController(QObject):
         self.set_state(target_state, target_priority, 400, force=True,
                        animation="happy" if proactive else None)
         context = self.memory.get_recent()
+        if self._selected_region_rect is not None:
+            context.append({"vision_selected_rect": self._selected_region_rect,
+                            "event_type": "internal"})
+            self._selected_region_rect = None
+        if re.search(r"(?:搜|搜索|查).*(?:剪贴板|刚复制)", message, re.I):
+            try:
+                from PyQt6.QtWidgets import QApplication
+                clipboard = QApplication.clipboard()
+                clipboard_text = clipboard.text().strip() if clipboard else ""
+                if clipboard_text:
+                    context.append({"clipboard": clipboard_text, "event_type": "internal"})
+            except Exception:
+                self.logger.debug("Clipboard text unavailable for explicit search", exc_info=True)
         memory_context = self.memory.prompt_context() if hasattr(self.memory, "prompt_context") else ""
         if memory_context:
             context.append({"memory": memory_context})
@@ -574,10 +604,12 @@ class PetController(QObject):
             token = self._state_token
             QTimer.singleShot(900, lambda: self._recover_if_current(token))
         self.message_received.emit(response)
-        self.memory.save(message, response["text"])
+        internal_event = bool(self.ai_session.pending_proactive)
+        if not internal_event:
+            self.memory.save(message, response["text"])
         should_extract = self._should_extract_memory(message, response)
         if (
-            should_extract
+            should_extract and not internal_event
             and hasattr(self.memory, "save_extracted")
             and hasattr(self.ai_router, "extract_memories")
             and (

@@ -46,6 +46,7 @@ class AISessionCoordinator(QObject):
         self.pending_source = "chat"
         self.pending_reaction: str | None = None
         self.pending_response: dict[str, str] | None = None
+        self.pending_proactive = False
         self.future: Any | None = None
         self.request_id = ""
         self.poll_timer = QTimer(self)
@@ -66,6 +67,7 @@ class AISessionCoordinator(QObject):
         self.pending_message = message
         self.pending_source = "chat"
         self.pending_response = None
+        self.pending_proactive = proactive
         self.request_id = uuid4().hex
         submitted_at = monotonic()
         try:
@@ -146,6 +148,7 @@ class AISessionCoordinator(QObject):
         self.response_completed(self.pending_message, response, self.pending_reaction)
         self.pending_reaction = None
         self.pending_response = None
+        self.pending_proactive = False
 
     def shutdown(self) -> None:
         self.poll_timer.stop()

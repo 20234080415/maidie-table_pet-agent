@@ -67,12 +67,17 @@ class ConfigStoreTests(unittest.TestCase):
             "vision_max_width": 1024,
             "vision_jpeg_quality": 80,
             "vision_cache_ttl_seconds": 8,
+            "vision_default_scope": "cursor_region",
+            "vision_cursor_region_width": 900,
+            "vision_cursor_region_height": 700,
         })
         saved = self.store.load()["vision"]
         public = self.store.public_settings()
         self.assertEqual(saved["workspace_id"], "ws-123")
         self.assertEqual(saved["api_key"], "vision-secret")
         self.assertEqual(public["vision_max_width"], 1024)
+        self.assertEqual(public["vision_default_scope"], "cursor_region")
+        self.assertEqual(public["vision_cursor_region_width"], 900)
         self.assertTrue(public["has_vision_api_key"])
         self.assertNotIn("vision-secret", repr(public))
 
