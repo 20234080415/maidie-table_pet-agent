@@ -82,6 +82,11 @@ class VisionInteractionTests(unittest.TestCase):
         self.capture.capture_cursor_region.assert_called_once_with()
         self.capture.capture_active_window.assert_not_called()
 
+    def test_natural_cursor_sentence_selects_cursor_region(self):
+        self.router.route("帮我看一下这个数学题怎么写就在我鼠标指着这一块")
+        self.capture.capture_cursor_region.assert_called_once_with()
+        self.capture.capture_active_window.assert_not_called()
+
     def test_refresh_forces_new_capture(self):
         self.router.route("你看看我现在屏幕")
         self.router.route("重新看一下屏幕")
@@ -134,6 +139,9 @@ class CursorRegionTests(unittest.TestCase):
     def test_cursor_request_explains_the_delay(self):
         pool = ThinkingFeedbackPool(chooser=lambda values: values[0])
         self.assertIn("三秒", pool.choose("看鼠标这块"))
+        self.assertIn(
+            "三秒", pool.choose("帮我看一下这个数学题怎么写就在我鼠标指着这一块")
+        )
 
 
 if __name__ == "__main__":

@@ -17,7 +17,9 @@ AMBIGUOUS_VISION = re.compile(
     r"[？?！!。.\s]*$", re.I,
 )
 CURSOR_VISION = re.compile(
-    r"^(?:看这里|看鼠标这块|这个按钮|这个位置|这块)[？?！!。.\s]*$", re.I,
+    r"^(?:看这里|看鼠标这块|这个按钮|这个位置|这块)[？?！!。.\s]*$|"
+    r"鼠标.*(?:指着|指向|附近|旁边).*(?:这|那|的)?.*(?:块|位置|区域|题|按钮)|"
+    r"鼠标.*(?:这块|这里|这个位置|这个按钮)", re.I,
 )
 TECHNICAL = re.compile(r"代码|编译|linux|cmake|makefile|python|api|报错", re.I)
 EXPLANATION = re.compile(r"是什么意思|怎么用|有什么作用", re.I)

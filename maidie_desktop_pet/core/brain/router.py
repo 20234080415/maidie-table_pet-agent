@@ -28,7 +28,9 @@ class BrainRouter:
     VISION_CLEAR = re.compile(r"^(?:不用看了|清除上下文)[？?！!。.\s]*$", re.I)
     VISION_CONFIRM = re.compile(r"^(?:嗯|对|是|看一下|你看|可以)[？?！!。.\s]*$", re.I)
     CURSOR_SCOPE = re.compile(
-        r"^(?:看这里|看鼠标这块|这个按钮|这个位置|这块)[？?！!。.\s]*$", re.I
+        r"^(?:看这里|看鼠标这块|这个按钮|这个位置|这块)[？?！!。.\s]*$|"
+        r"鼠标.*(?:指着|指向|附近|旁边).*(?:这|那|的)?.*(?:块|位置|区域|题|按钮)|"
+        r"鼠标.*(?:这块|这里|这个位置|这个按钮)", re.I
     )
     def __init__(self, chat_client: Any, codex_client: Any, tool_registry: Any, memory: Any,
                  classifier: IntentClassifier | None = None, planner: BrainPlanner | None = None,

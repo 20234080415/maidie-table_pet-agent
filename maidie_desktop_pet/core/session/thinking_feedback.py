@@ -17,7 +17,9 @@ class ThinkingFeedbackPool:
     CHAT = ("我想想。", "等我一下。", "让我想想怎么说。", "嗯……", "好呀，我想想。")
     SCREEN_QUERY = re.compile(r"屏幕|当前窗口|这个报错|这题|这个题|这里", re.I)
     CURSOR_QUERY = re.compile(
-        r"^(?:看这里|看鼠标这块|这个按钮|这个位置|这块)[？?！!。.\s]*$", re.I
+        r"^(?:看这里|看鼠标这块|这个按钮|这个位置|这块)[？?！!。.\s]*$|"
+        r"鼠标.*(?:指着|指向|附近|旁边).*(?:这|那|的)?.*(?:块|位置|区域|题|按钮)|"
+        r"鼠标.*(?:这块|这里|这个位置|这个按钮)", re.I
     )
     TECHNICAL_QUERY = re.compile(r"代码|编译|linux|cmake|makefile|python|api|报错|bug", re.I)
 
@@ -29,7 +31,7 @@ class ThinkingFeedbackPool:
 
     def phrases_for(self, message: str) -> tuple[str, ...]:
         text = str(message).strip()
-        if self.CURSOR_QUERY.fullmatch(text):
+        if self.CURSOR_QUERY.search(text):
             return self.CURSOR
         if self.SCREEN_QUERY.search(text):
             return self.SCREEN
