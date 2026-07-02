@@ -74,6 +74,7 @@ class PetWindow(QWidget):
         controller.message_received.connect(self._show_reply)
         controller.stream_started.connect(self._start_stream)
         controller.message_delta.connect(self._append_stream)
+        controller.local_message_requested.connect(self._show_local_message)
         controller.position_requested.connect(self._move_from_controller)
         controller.gaze_changed.connect(self.character.set_gaze)
         controller.facing_changed.connect(self.character.set_facing_right)
@@ -120,6 +121,10 @@ class PetWindow(QWidget):
     def _show_reply(self, response: dict) -> None:
         self.bubble_controller.complete_stream(response)
 
+    def _show_local_message(self, text: str) -> None:
+        self.bubble.show_message(text)
+        self._position_overlays()
+
     def _start_stream(self, metadata: dict) -> None:
         self.bubble_controller.begin_stream(metadata)
 
@@ -155,6 +160,11 @@ class PetWindow(QWidget):
             menu.addAction("缩小 10%", lambda: self.scale_window(0.9))
             menu.addAction("恢复默认大小", lambda: self.resize(320, 380))
             menu.addAction("清除记忆", self.controller.clear_memory)
+            menu.addSeparator()
+            if self.controller.fence.is_enabled():
+                menu.addAction("解除围栏模式", lambda: self.controller.disable_fence())
+            else:
+                menu.addAction("开启围栏模式", lambda: self.controller.enable_fence())
             menu.addSeparator()
             menu.addAction("退出 Maidie", self.close)
             menu.exec(global_pos)

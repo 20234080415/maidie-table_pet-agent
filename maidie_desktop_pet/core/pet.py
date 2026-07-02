@@ -15,6 +15,7 @@ from animation.direction_manager import DirectionManager
 from core.behavior import AutonomousBehaviorController, BehaviorKind
 from core.experience import AttentionManager, BehaviorOrchestrator, EmotionState
 from core.brain.fast_route import is_simple_time_query, is_weather_query
+from core.fence import FenceController
 from core.movement import Bounds, MovementController, Vec2
 from core.session import AISessionCoordinator
 from core.state import BehaviorPriority, PetState, StateMachine
@@ -35,6 +36,7 @@ class PetController(QObject):
     facing_changed = pyqtSignal(bool)
     emotion_changed = pyqtSignal(str)
     sentence_completed = pyqtSignal(str)
+    local_message_requested = pyqtSignal(str)
 
     def __init__(
         self,
@@ -62,6 +64,7 @@ class PetController(QObject):
         self.attention_manager = AttentionManager()
         self.behavior_orchestrator = BehaviorOrchestrator()
         self.bounds = Bounds(0, 0, 1920, 1080)
+        self.fence = FenceController()
         self.cursor = Vec2()
         self.cursor_chase = False
         self._listeners: dict[str, list[Callable[..., None]]] = defaultdict(list)
@@ -261,6 +264,33 @@ class PetController(QObject):
     def set_screen_bounds(self, left: float, top: float, right: float, bottom: float) -> None:
         self.bounds = Bounds(left, top, right, bottom)
 
+    def active_bounds(self) -> Bounds:
+        return self.fence.active_bounds(
+            self.movement.window_width, self.movement.window_height, self.bounds
+        )
+
+    def enable_fence(self, default_width: float = 360, default_height: float = 260) -> Bounds:
+        center_x = self.movement.position.x + self.movement.window_width / 2
+        center_y = self.movement.position.y + self.movement.window_height / 2
+        rect = self.fence.enable_default(
+            center_x, center_y, self.bounds,
+            self.movement.window_width, self.movement.window_height,
+            default_width, default_height,
+        )
+        self.movement.stop()
+        x, y = self.fence.clamp_point(
+            self.movement.position.x, self.movement.position.y,
+            self.movement.window_width, self.movement.window_height,
+        )
+        self.sync_geometry(x, y, self.movement.window_width, self.movement.window_height)
+        self.position_requested.emit(x, y)
+        self.behavior.postpone(1.0)
+        return rect
+
+    def disable_fence(self) -> None:
+        self.fence.disable()
+        self.behavior.postpone(1.0)
+
     def sync_geometry(self, x: float, y: float, width: float, height: float) -> None:
         self.movement.sync_geometry(x, y, width, height)
 
@@ -268,12 +298,24 @@ class PetController(QObject):
         self, x: float, y: float, width: float, height: float, drag_dx: float = 0.0
     ) -> None:
         self.movement.stop()
+        was_outside = self.fence.is_enabled() and not self.fence.contains_pet(
+            x, y, width, height
+        )
+        x, y = self.fence.nearest_inside_position(x, y, width, height)
         self.sync_geometry(x, y, width, height)
+        if was_outside:
+            self.position_requested.emit(x, y)
         previous_facing = self.direction.facing_right
         facing_right = self.direction.update_direction(drag_dx)
         if facing_right != previous_facing:
             self.facing_changed.emit(facing_right)
         self.behavior.postpone(2.5)
+        if was_outside and self.fence.should_complain():
+            self.local_message_requested.emit(self.fence.complaint_text())
+            if not self._play_action("shy", force=True):
+                self.set_state(PetState.REACTING, BehaviorPriority.USER_CLICK, 900,
+                               force=True, animation="reacting")
+            return
         if drag_dx > 30:
             self._play_action("dizzy-right", force=True)
         else:
@@ -557,9 +599,10 @@ class PetController(QObject):
         dt = now - self._last_tick
         self._last_tick = now
 
+        active_bounds = self.active_bounds()
         if not self._busy and self.state_machine.can_interrupt(BehaviorPriority.AUTONOMOUS):
             intent = self.behavior.decide(
-                self.bounds,
+                active_bounds,
                 (self.movement.window_width, self.movement.window_height),
                 self.cursor,
             )
@@ -582,7 +625,7 @@ class PetController(QObject):
                     self.movement.move_to(intent.target, intent.run)
 
         old_position = Vec2(self.movement.position.x, self.movement.position.y)
-        position = self.movement.tick(dt, self.bounds)
+        position = self.movement.tick(dt, active_bounds)
         previous_facing = self.direction.facing_right
         facing_right = self.direction.update_direction(position.x - old_position.x)
         if facing_right != previous_facing:

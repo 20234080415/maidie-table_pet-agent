@@ -73,12 +73,16 @@ class MovementController:
 
     def tick(self, dt: float, bounds: Bounds) -> Vec2:
         dt = min(max(dt, 0.0), 0.1)
+        max_x = max(bounds.left, bounds.right - self.window_width)
+        max_y = max(bounds.top, bounds.bottom - self.window_height)
+        self.position = Vec2(
+            max(bounds.left, min(max_x, self.position.x)),
+            max(bounds.top, min(max_y, self.position.y)),
+        )
         if self.target is None:
             self.velocity = Vec2()
             return self.position
 
-        max_x = max(bounds.left, bounds.right - self.window_width)
-        max_y = max(bounds.top, bounds.bottom - self.window_height)
         goal = Vec2(
             max(bounds.left, min(max_x, self.target.x)),
             max(bounds.top, min(max_y, self.target.y)),
