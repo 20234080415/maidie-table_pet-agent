@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from time import monotonic
@@ -12,6 +14,7 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from animation.direction_manager import DirectionManager
 from core.behavior import AutonomousBehaviorController, BehaviorKind
 from core.experience import AttentionManager, BehaviorOrchestrator, EmotionState
+from core.brain.fast_route import is_simple_time_query, is_weather_query
 from core.movement import Bounds, MovementController, Vec2
 from core.session import AISessionCoordinator
 from core.state import BehaviorPriority, PetState, StateMachine
@@ -63,13 +66,16 @@ class PetController(QObject):
         self.cursor_chase = False
         self._listeners: dict[str, list[Callable[..., None]]] = defaultdict(list)
         self._plugins: list[Any] = []
-        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="maidie-ai")
+        self._user_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="maidie-user")
+        self._proactive_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="maidie-proactive")
+        self._memory_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="maidie-memory")
+        self._executor = self._user_executor  # Compatibility alias.
         self._proactive_future: Any | None = None
         self._proactive_poll_timer = QTimer(self)
         self._proactive_poll_timer.setInterval(15)
         self._proactive_poll_timer.timeout.connect(self._poll_proactive_future)
         self.ai_session = AISessionCoordinator(
-            ai_router, self._executor, self.logger,
+            ai_router, self._user_executor, self.logger,
             self._prepare_ai_request, self._show_stream_fragment,
             self._on_ai_result, self._on_ai_response_completed,
             self.sentence_completed.emit, self,
@@ -346,6 +352,7 @@ class PetController(QObject):
             self.action_registry.match_message(message) if self.action_registry else None
         )
         self.stream_started.emit({"source": "chat"})
+        self.message_delta.emit("等我一下下。")
         self.emotion_state.apply_event("ai_thinking")
         self.emotion_changed.emit("thinking")
         self.movement.stop()
@@ -427,27 +434,54 @@ class PetController(QObject):
             QTimer.singleShot(900, lambda: self._recover_if_current(token))
         self.message_received.emit(response)
         self.memory.save(message, response["text"])
+        should_extract = self._should_extract_memory(message, response)
         if (
-            hasattr(self.memory, "save_extracted")
+            should_extract
+            and hasattr(self.memory, "save_extracted")
             and hasattr(self.ai_router, "extract_memories")
             and (
                 not hasattr(self.memory, "can_extract")
                 or self.memory.can_extract(message, response["text"])
             )
         ):
-            self._executor.submit(
+            self._memory_executor.submit(
                 self._extract_and_store_memories,
                 message,
                 response["text"],
             )
+        elif not should_extract:
+            try:
+                self.logger.debug("performance memory_extraction_skipped=true request_id=%s",
+                                  self.ai_session.request_id)
+            except Exception:
+                pass
         self._broadcast("on_message", response)
 
+    @staticmethod
+    def _should_extract_memory(message: str, response: dict[str, str]) -> bool:
+        text = message.strip()
+        if is_simple_time_query(text) or is_weather_query(text):
+            return False
+        if re.fullmatch(r"(?:你好|嗨|hello|hi|嗯|好的)[！!。.？?\s]*", text, re.I):
+            return False
+        if response.get("source") in {"tool", "screen"}:
+            return False
+        return True
+
     def _extract_and_store_memories(self, message: str, response: str) -> None:
+        started = monotonic()
         try:
             extracted = self.ai_router.extract_memories(message, response)
             self.memory.save_extracted(extracted)
         except Exception:
             self.logger.exception("Memory extraction failed")
+        finally:
+            try:
+                self.logger.debug("performance memory_extraction_duration_ms=%.3f thread_name=%s",
+                                  (monotonic() - started) * 1000,
+                                  threading.current_thread().name)
+            except Exception:
+                pass
 
     def _activate_talking(self, animation: str, duration: int) -> None:
         if self.action_registry and self.action_registry.get(animation):
@@ -567,7 +601,7 @@ class PetController(QObject):
             return
         if self._proactive_future is not None and not self._proactive_future.done():
             return
-        self._proactive_future = self._executor.submit(self.proactive_runtime.tick)
+        self._proactive_future = self._proactive_executor.submit(self.proactive_runtime.tick)
         self._proactive_poll_timer.start()
 
     def _poll_proactive_future(self) -> None:
@@ -632,4 +666,6 @@ class PetController(QObject):
         self._proactive_timer.stop()
         self.ai_session.shutdown()
         self._proactive_poll_timer.stop()
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        self._user_executor.shutdown(wait=False, cancel_futures=True)
+        self._proactive_executor.shutdown(wait=False, cancel_futures=True)
+        self._memory_executor.shutdown(wait=False, cancel_futures=True)

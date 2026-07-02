@@ -56,8 +56,8 @@ class ProactiveNonblockingTests(unittest.TestCase):
     def test_tick_submits_runtime_instead_of_calling_it(self):
         controller, runtime = self.make_controller()
         executor = _Executor(_Future(done=False))
-        controller._executor.shutdown(wait=False, cancel_futures=True)
-        controller._executor = executor
+        controller._proactive_executor.shutdown(wait=False, cancel_futures=True)
+        controller._proactive_executor = executor
 
         controller._proactive_tick()
 
@@ -68,8 +68,8 @@ class ProactiveNonblockingTests(unittest.TestCase):
     def test_tick_does_not_submit_while_future_is_running(self):
         controller, _runtime = self.make_controller()
         executor = _Executor(_Future(done=False))
-        controller._executor.shutdown(wait=False, cancel_futures=True)
-        controller._executor = executor
+        controller._proactive_executor.shutdown(wait=False, cancel_futures=True)
+        controller._proactive_executor = executor
         controller._proactive_future = executor.future
 
         controller._proactive_tick()

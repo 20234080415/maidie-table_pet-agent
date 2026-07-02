@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from core.brain.fast_route import fast_route
 from core.brain.intent_classifier import IntentClassifier
 
 
@@ -48,17 +49,13 @@ Rules:
         return str(route["intent"])
 
     def route(self, user_input: str, context: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-        if self.fallback.classify(user_input) == "screen":
-            self.last_route = {
-                "intent": "screen",
-                "confidence": 1.0,
-                "reason": "explicit screen reference",
-                "source": "explicit",
-            }
+        deterministic = fast_route(user_input)
+        if deterministic:
+            self.last_route = deterministic
             return self.last_route
         try:
             route = self._route_with_llm(user_input, context or [])
-            self.last_route = {**route, "source": "llm"}
+            self.last_route = {**route, "source": "llm", "route_source": "llm"}
             return self.last_route
         except Exception as exc:
             intent = self.fallback.classify(user_input)
@@ -67,6 +64,7 @@ Rules:
                 "confidence": 0.0,
                 "reason": f"LLM router failed; fallback used: {exc}",
                 "source": "fallback",
+                "route_source": "fallback",
             }
             return self.last_route
 

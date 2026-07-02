@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from time import monotonic
 from typing import Any
+
+from core.performance import mark
 
 
 class BrainExecutor:
@@ -22,7 +25,12 @@ class BrainExecutor:
                 if tool_name not in self.ALLOWED_TOOLS:
                     result = self._error(tool_name, "tool blocked by executor")
                 else:
-                    result = self._execute_tool(tool_name, user_input, params)
+                    started = monotonic()
+                    try:
+                        result = self._execute_tool(tool_name, user_input, params)
+                    finally:
+                        mark(tool_name=tool_name,
+                             tool_duration_ms=round((monotonic() - started) * 1000, 3))
                 if not isinstance(result, dict):
                     raise TypeError("tool returned a non-structured result")
                 safe_result = dict(result)

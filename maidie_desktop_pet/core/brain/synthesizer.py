@@ -4,6 +4,8 @@ import json
 from typing import Any, Callable
 
 from ai.client import normalize_response
+from core.brain.fast_route import is_simple_time_query, is_simple_weather_query
+from core.performance import mark
 from core.personality import MaidieStyle
 
 
@@ -23,7 +25,10 @@ class Synthesizer:
                    technical: bool = False) -> dict[str, str]:
         client = self.codex_client if technical else self.chat_client
         prompt = self._prompt(user_input, source, plan, tool_data, memory_context)
-        if source == "screen" and self._screen_failure(tool_data):
+        if self.should_use_local_tool_response(user_input, tool_data):
+            mark(local_response_used=True)
+            normalized = self._local_fallback(source, tool_data)
+        elif source == "screen" and self._screen_failure(tool_data):
             normalized = self._local_fallback(source, tool_data)
         elif source != "chat" and not self._client_ready(client):
             normalized = self._local_fallback(source, tool_data)
@@ -41,6 +46,16 @@ class Synthesizer:
         if on_delta:
             on_delta(result["text"])
         return result
+
+    @staticmethod
+    def should_use_local_tool_response(user_input: str,
+                                       tool_data: list[dict[str, Any]]) -> bool:
+        successful_types = {
+            str(item.get("data", {}).get("type", ""))
+            for item in tool_data if item.get("ok")
+        }
+        return (("time" in successful_types and is_simple_time_query(user_input))
+                or ("weather" in successful_types and is_simple_weather_query(user_input)))
 
     @staticmethod
     def _client_ready(client: Any) -> bool:

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import logging
+from time import monotonic
 from typing import Any, Callable
+from uuid import uuid4
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from core.chat.chat_streamer import ChatStreamer
+from core.performance import begin, finish
 
 
 class AISessionCoordinator(QObject):
@@ -39,6 +42,7 @@ class AISessionCoordinator(QObject):
         self.pending_reaction: str | None = None
         self.pending_response: dict[str, str] | None = None
         self.future: Any | None = None
+        self.request_id = ""
         self.poll_timer = QTimer(self)
         self.poll_timer.setInterval(15)
         self.poll_timer.timeout.connect(self.poll_future)
@@ -57,10 +61,14 @@ class AISessionCoordinator(QObject):
         self.pending_message = message
         self.pending_source = "chat"
         self.pending_response = None
+        self.request_id = uuid4().hex
+        submitted_at = monotonic()
         try:
             self.streamer.start()
             context, self.pending_reaction = self.prepare_request(message, proactive)
-            self.future = self.executor.submit(self._run_request, message, context)
+            self.future = self.executor.submit(
+                self._run_request, message, context, self.request_id, submitted_at
+            )
             self.poll_timer.start()
             return True
         except Exception:
@@ -69,12 +77,17 @@ class AISessionCoordinator(QObject):
             return False
 
     def _run_request(self, message: str,
-                     context: list[dict[str, Any]]) -> dict[str, str]:
-        return self.ai_router.ask_stream(
-            message,
-            context,
-            lambda delta: self._stream_delta_ready.emit(delta),
-        )
+                     context: list[dict[str, Any]], request_id: str,
+                     submitted_at: float) -> dict[str, str]:
+        begin(request_id, message, submitted_at)
+        try:
+            return self.ai_router.ask_stream(
+                message,
+                context,
+                lambda delta: self._stream_delta_ready.emit(delta),
+            )
+        finally:
+            finish(self.logger, submitted_at)
 
     def poll_future(self) -> None:
         future = self.future

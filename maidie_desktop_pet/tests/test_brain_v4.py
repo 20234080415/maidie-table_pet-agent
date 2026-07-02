@@ -77,7 +77,7 @@ class BrainV4AcceptanceTests(unittest.TestCase):
 
         router = LLMIntentRouter(BrokenClient(), IntentClassifier())
         self.assertEqual(router.classify("你能看到我屏幕吗"), "screen")
-        self.assertEqual(router.last_route["source"], "explicit")
+        self.assertEqual(router.last_route["source"], "fast_rule")
 
     def test_planner_execution(self):
         plan = BrainPlanner().plan("明天天气适不适合跑步", self.memory)
@@ -107,7 +107,7 @@ class BrainV4AcceptanceTests(unittest.TestCase):
 
     def test_personality_preservation(self):
         result = self.router.ask("现在几点", [])
-        self.assertTrue(result["text"].startswith("好啦好啦，"))
+        self.assertRegex(result["text"], r"\d{2}:\d{2}")
         self.assertNotRegex(result["text"], r"Router|Planner|tool|工具调用")
         self.assertEqual(set(result), {"text", "emotion", "action", "state", "source"})
 

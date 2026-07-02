@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from core.brain.fast_route import is_simple_time_query, is_weather_query
+
 
 class BrainPlanner:
     """Builds deterministic data plans and never produces user-facing prose."""
@@ -36,8 +38,9 @@ class BrainPlanner:
     def plan(self, user_input: str, memory: Any = None) -> dict[str, Any]:
         text = str(user_input).strip()
         steps: list[dict[str, Any]] = []
-        needs_weather = bool(re.search(r"天气|气温|温度|下雨|跑步|出门|weather|temperature", text, re.I))
-        needs_time = bool(re.search(r"几点|时间|日期|星期|\btime\b|\bdate\b", text, re.I))
+        needs_weather = (is_weather_query(text)
+                         or bool(re.search(r"天气|气温|温度|下雨|跑步|出门|穿什么|出去玩|weather|temperature", text, re.I)))
+        needs_time = is_simple_time_query(text)
         if needs_weather:
             steps.append(self._step("weather", "读取天气事实", {"query": text}))
         if needs_time:
