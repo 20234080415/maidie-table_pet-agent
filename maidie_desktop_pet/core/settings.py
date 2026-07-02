@@ -33,6 +33,7 @@ PROACTIVE_DEFAULTS = {
 }
 
 VISION_DEFAULTS = {"enabled": False, "interval_seconds": 60}
+FENCE_DEFAULTS = {"show_overlay": True}
 
 
 class ConfigStore:
@@ -54,6 +55,9 @@ class ConfigStore:
             vision = config.setdefault("vision", {})
             for key, value in VISION_DEFAULTS.items():
                 vision.setdefault(key, value)
+            fence = config.setdefault("fence", {})
+            for key, value in FENCE_DEFAULTS.items():
+                fence.setdefault(key, value)
             return config
 
     def public_settings(self) -> dict[str, Any]:

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
 from time import monotonic
 from unittest.mock import Mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 from core.behavior import AutonomousBehaviorController
@@ -14,6 +16,8 @@ from core.experience import DialoguePool
 from core.fence import FenceController, FenceZone
 from core.movement import Bounds, MovementController, Vec2
 from core.pet import PetController
+from ui.fence_overlay import FenceOverlayWindow
+from ui.window import PetWindow
 
 
 class _Memory:
@@ -144,7 +148,6 @@ class FenceControllerIntegrationTests(unittest.TestCase):
         controller.on_pet_dragged(0, 0, 100, 100)
         self.assertEqual(controller.movement.position, Vec2(0, 0))
         controller.shutdown()
-
     def make_controller(self):
         controller = PetController(object(), _Memory(), logger=Mock())
         controller._tick_timer.stop()
@@ -210,6 +213,61 @@ class FenceControllerIntegrationTests(unittest.TestCase):
             controller.on_pet_dragged(0, 0, 100, 100)
         self.assertEqual(len(messages), 1)
         controller.shutdown()
+
+
+class FenceOverlayTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        self.overlay = FenceOverlayWindow()
+
+    def tearDown(self):
+        self.overlay.close()
+
+    def test_rect_and_updates_match_fence_bounds(self):
+        self.overlay.update_rect(Bounds(100, 120, 460, 380))
+        self.assertEqual(self.overlay.geometry().getRect(), (100, 120, 360, 260))
+        self.overlay.update_rect(Bounds(20, 30, 220, 180))
+        self.assertEqual(self.overlay.geometry().getRect(), (20, 30, 200, 150))
+
+    def test_overlay_is_non_focusing_and_click_through(self):
+        flags = self.overlay.windowFlags()
+        self.assertTrue(flags & Qt.WindowType.FramelessWindowHint)
+        self.assertTrue(flags & Qt.WindowType.Tool)
+        self.assertTrue(flags & Qt.WindowType.WindowStaysOnTopHint)
+        self.assertTrue(flags & Qt.WindowType.WindowDoesNotAcceptFocus)
+        self.assertTrue(flags & Qt.WindowType.WindowTransparentForInput)
+        self.assertTrue(self.overlay.testAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        ))
+        self.assertTrue(self.overlay.testAttribute(
+            Qt.WidgetAttribute.WA_ShowWithoutActivating
+        ))
+
+    def test_pet_window_shows_and_hides_overlay_with_fence(self):
+        controller = PetController(object(), _Memory(), logger=Mock())
+        controller._tick_timer.stop()
+        window = PetWindow(
+            controller, Path(__file__).resolve().parents[1] / "assets",
+            options={"width": 100, "height": 120},
+            fence_options={"show_overlay": True},
+        )
+        controller.enable_fence()
+        QApplication.processEvents()
+        self.assertTrue(window.fence_overlay.isVisible())
+        rect = controller.fence.rect
+        self.assertIsNotNone(rect)
+        self.assertEqual(
+            window.fence_overlay.geometry().getRect(),
+            (round(rect.left), round(rect.top), round(rect.right - rect.left),
+             round(rect.bottom - rect.top)),
+        )
+        controller.disable_fence()
+        QApplication.processEvents()
+        self.assertFalse(window.fence_overlay.isVisible())
+        window.close()
 
 
 if __name__ == "__main__":

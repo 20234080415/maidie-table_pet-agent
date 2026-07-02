@@ -98,6 +98,7 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
         assets_dir=ROOT / "assets",
         options=config.get("window", {}),
         confirmation_broker=confirmation_broker,
+        fence_options=config.get("fence", {}),
     )
     input_manager = InputManager(window.global_rect)
     input_manager.cursor_moved.connect(controller.on_cursor_moved)

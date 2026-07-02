@@ -12,6 +12,7 @@ from input.gesture import PetGestureRecognizer
 from ui.bubble import SpeechBubble
 from ui.chat_input import ChatInput
 from ui.dialogs import RecentChatsDialog, SettingsDialog
+from ui.fence_overlay import FenceOverlayWindow
 from ui.resize_handle import SubtleResizeHandle
 from ui.sprite import HatchPetSprite
 
@@ -20,7 +21,7 @@ class PetWindow(QWidget):
     """Presentation-only window: renders controller signals and forwards input."""
 
     def __init__(self, controller, assets_dir: Path, options: dict | None = None,
-                 confirmation_broker=None):
+                 confirmation_broker=None, fence_options: dict | None = None):
         super().__init__()
         options = options or {}
         self.controller = controller
@@ -40,6 +41,9 @@ class PetWindow(QWidget):
         self._positioning_overlays = False
         self._dialog = None
         self.confirmation_broker = confirmation_broker
+        self.fence_overlay = FenceOverlayWindow() if (fence_options or {}).get(
+            "show_overlay", True
+        ) else None
         if confirmation_broker:
             confirmation_broker.requested.connect(self._confirm_system_action)
 
@@ -78,11 +82,21 @@ class PetWindow(QWidget):
         controller.position_requested.connect(self._move_from_controller)
         controller.gaze_changed.connect(self.character.set_gaze)
         controller.facing_changed.connect(self.character.set_facing_right)
+        controller.fence_changed.connect(self._update_fence_overlay)
         self.character.set_facing_right(controller.direction.facing_right)
         self.character.set_animation("idle")
         self._move_to_bottom_right()
         self._position_overlays()
         self.resize_handle.raise_()
+
+    def _update_fence_overlay(self, rect) -> None:
+        if self.fence_overlay is None:
+            return
+        if rect is None:
+            self.fence_overlay.hide()
+            return
+        self.fence_overlay.update_rect(rect)
+        self.fence_overlay.show()
 
     def _confirm_system_action(self, request: dict) -> None:
         action = str(request.get("action", "system action"))
@@ -398,5 +412,7 @@ class PetWindow(QWidget):
     def closeEvent(self, event) -> None:
         self.bubble.close()
         self.chat_input.close()
+        if self.fence_overlay is not None:
+            self.fence_overlay.close()
         self.controller.shutdown()
         super().closeEvent(event)

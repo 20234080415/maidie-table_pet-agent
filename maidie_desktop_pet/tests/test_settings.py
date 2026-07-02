@@ -55,6 +55,9 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertEqual(public["proactive_tick_seconds"], 45)
         self.assertFalse(public["screen_awareness_enabled"])
 
+    def test_fence_overlay_is_enabled_by_default(self):
+        self.assertTrue(self.store.load()["fence"]["show_overlay"])
+
 
 if __name__ == "__main__":
     unittest.main()

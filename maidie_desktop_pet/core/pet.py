@@ -37,6 +37,7 @@ class PetController(QObject):
     emotion_changed = pyqtSignal(str)
     sentence_completed = pyqtSignal(str)
     local_message_requested = pyqtSignal(str)
+    fence_changed = pyqtSignal(object)
 
     def __init__(
         self,
@@ -292,6 +293,7 @@ class PetController(QObject):
         self.behavior.postpone(1.0)
         self._emit_fence_feedback("fence_enabled", "shy")
         self._log_fence("fence_enabled", rect=rect)
+        self.fence_changed.emit(rect)
         return rect
 
     def disable_fence(self) -> None:
@@ -299,6 +301,7 @@ class PetController(QObject):
         self.fence.disable()
         self.behavior.postpone(1.0)
         if was_enabled:
+            self.fence_changed.emit(None)
             self._emit_fence_feedback("fence_disabled", "celebrate")
             self._log_fence("fence_disabled")
 
