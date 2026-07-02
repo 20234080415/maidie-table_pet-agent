@@ -1,3 +1,5 @@
+"""Compatibility tests for the deprecated core.agent AI pipeline."""
+
 from __future__ import annotations
 
 import unittest

@@ -28,6 +28,11 @@ Maidie 是一个运行在 Windows 桌面的常驻 AI 桌宠。它把透明置顶
 
 ## 3. 总体架构
 
+`main.py` assembles the production AI path from `core/brain/*`. The older
+`ai/router.py` and AI orchestration modules in `core/agent/*` are retained only
+for compatibility and legacy tests; new AI features must target `core.brain`.
+`core/agent/confirmation.py` remains active production security infrastructure.
+
 ```mermaid
 flowchart LR
     U["用户输入 / 主动触发"] --> C["PetController"]

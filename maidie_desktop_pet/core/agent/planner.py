@@ -1,3 +1,9 @@
+"""Deprecated compatibility layer; production planning uses :mod:`core.brain`.
+
+Do not add new features here. This module remains only for legacy callers and
+compatibility tests.
+"""
+
 from __future__ import annotations
 
 import re

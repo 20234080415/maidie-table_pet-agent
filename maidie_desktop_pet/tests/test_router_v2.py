@@ -1,3 +1,5 @@
+"""Compatibility tests for the deprecated AIRouter/core.agent pipeline."""
+
 from __future__ import annotations
 
 import unittest

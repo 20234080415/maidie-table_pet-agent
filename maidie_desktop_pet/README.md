@@ -7,6 +7,12 @@
 
 ### Maidie Core Brain V4
 
+Architecture ownership: `core/brain/*` is the production AI pipeline. The
+older `ai/router.py` and AI orchestration modules under `core/agent/*` are
+deprecated compatibility layers; do not add new features there. The production
+`ConfirmationBroker` remains under `core/agent/confirmation.py` and is not
+deprecated.
+
 生产聊天入口现在统一经过 `core/brain/BrainRouter`：`LLMIntentRouter` 是唯一正常
 意图决策入口，负责把用户输入分类为 `chat/task/screen/code_task/system_task`。
 旧的 regex `IntentClassifier` 只在 LLM 路由失败、超时、空输出或返回非法 JSON 时

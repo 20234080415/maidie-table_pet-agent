@@ -1,3 +1,5 @@
+"""Compatibility tests for the deprecated AIRouter; production uses core.brain."""
+
 from __future__ import annotations
 
 import unittest

@@ -1,3 +1,5 @@
+"""Compatibility tests retaining legacy ToolExecutor coverage."""
+
 from __future__ import annotations
 
 import tempfile
