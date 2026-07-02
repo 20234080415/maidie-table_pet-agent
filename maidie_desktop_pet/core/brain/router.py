@@ -12,6 +12,7 @@ from core.brain.planner import BrainPlanner
 from core.brain.synthesizer import Synthesizer
 from core.performance import mark
 from core.vision.vision_session import VisionSession
+from core.vision.intent_rules import vision_scope_for
 
 
 class BrainRouter:
@@ -27,11 +28,6 @@ class BrainRouter:
     )
     VISION_CLEAR = re.compile(r"^(?:不用看了|清除上下文)[？?！!。.\s]*$", re.I)
     VISION_CONFIRM = re.compile(r"^(?:嗯|对|是|看一下|你看|可以)[？?！!。.\s]*$", re.I)
-    CURSOR_SCOPE = re.compile(
-        r"^(?:看这里|看鼠标这块|这个按钮|这个位置|这块)[？?！!。.\s]*$|"
-        r"鼠标.*(?:指着|指向|附近|旁边).*(?:这|那|的)?.*(?:块|位置|区域|题|按钮)|"
-        r"鼠标.*(?:这块|这里|这个位置|这个按钮)", re.I
-    )
     def __init__(self, chat_client: Any, codex_client: Any, tool_registry: Any, memory: Any,
                  classifier: IntentClassifier | None = None, planner: BrainPlanner | None = None,
                  synthesizer: Synthesizer | None = None,
@@ -110,8 +106,9 @@ class BrainRouter:
                 plan = self.planner.plan_for_intent(user_input, intent, self.memory, attention)
                 if intent in {"vision", "screen"}:
                     scope = (session.scope if follow_up and session is not None else
-                             "cursor_region" if self.CURSOR_SCOPE.search(user_input) else
-                             str(route.get("vision_scope") or "active_window"))
+                             vision_scope_for(
+                                 user_input, str(route.get("vision_scope") or "active_window")
+                             ))
                     force_refresh = bool(self.VISION_REFRESH.search(user_input))
                     for step in plan.get("steps", []):
                         if isinstance(step, dict) and step.get("tool") == "screen":

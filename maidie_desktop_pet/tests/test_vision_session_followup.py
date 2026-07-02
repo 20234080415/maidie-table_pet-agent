@@ -9,6 +9,7 @@ from core.brain import BrainRouter
 from core.session.thinking_feedback import ThinkingFeedbackPool
 from core.tools import ScreenTool, ToolRegistry
 from core.vision import ScreenCapture, VisionContext, VisionService, VisionSession
+from core.vision.intent_rules import is_cursor_region_request
 
 
 class _Memory:
@@ -106,6 +107,28 @@ class VisionInteractionTests(unittest.TestCase):
 
 
 class CursorRegionTests(unittest.TestCase):
+    def test_compositional_cursor_language(self):
+        positives = (
+            "帮我看一下这个数学题怎么写就在我鼠标指着这一块",
+            "请分析光标旁边的错误",
+            "能看看指针指向的题目吗",
+            "鼠标附近这个按钮应该怎么点",
+            "帮忙检查鼠标所在位置",
+            "看看这里",
+        )
+        negatives = (
+            "我的鼠标坏了",
+            "我喜欢这个按钮的颜色",
+            "光标为什么会闪烁",
+            "这一块蛋糕很好吃",
+        )
+        for text in positives:
+            with self.subTest(text=text):
+                self.assertTrue(is_cursor_region_request(text))
+        for text in negatives:
+            with self.subTest(text=text):
+                self.assertFalse(is_cursor_region_request(text))
+
     def test_region_is_clamped_to_screen(self):
         calls = []
 

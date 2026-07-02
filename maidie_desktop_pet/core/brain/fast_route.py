@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from core.vision.intent_rules import is_cursor_region_request
+
 
 TIME = re.compile(r"现在几点|今天几号|今天星期几|当前时间|现在时间|\b(?:time|date)\b", re.I)
 WEATHER = re.compile(r"天气怎么样|今天天气|今天下雨吗|今天冷不冷|现在多少度|(?:长沙|深圳)天气", re.I)
@@ -15,11 +17,6 @@ SCREEN = re.compile(
 AMBIGUOUS_VISION = re.compile(
     r"^(?:这个怎么弄|这是啥情况|帮我看看|帮我看一下|看一下|这个什么意思|这个题怎么写|这题怎么做)"
     r"[？?！!。.\s]*$", re.I,
-)
-CURSOR_VISION = re.compile(
-    r"^(?:看这里|看鼠标这块|这个按钮|这个位置|这块)[？?！!。.\s]*$|"
-    r"鼠标.*(?:指着|指向|附近|旁边).*(?:这|那|的)?.*(?:块|位置|区域|题|按钮)|"
-    r"鼠标.*(?:这块|这里|这个位置|这个按钮)", re.I,
 )
 TECHNICAL = re.compile(r"代码|编译|linux|cmake|makefile|python|api|报错", re.I)
 EXPLANATION = re.compile(r"是什么意思|怎么用|有什么作用", re.I)
@@ -43,7 +40,7 @@ def is_simple_weather_query(text: str) -> bool:
 
 def fast_route(text: str) -> dict[str, Any] | None:
     value = str(text).strip()
-    if CURSOR_VISION.search(value):
+    if is_cursor_region_request(value):
         return _route("vision", "explicit cursor-region request", need_screen=True,
                       need_vision=True, vision_scope="cursor_region")
     if AMBIGUOUS_VISION.fullmatch(value):
