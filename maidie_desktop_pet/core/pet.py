@@ -228,6 +228,10 @@ class PetController(QObject):
                 vision = config.get("vision", {})
                 screen_reader.enabled = bool(vision.get("enabled", False))
                 screen_reader.interval_seconds = max(30.0, float(vision.get("interval_seconds", 60)))
+        screen_tool = self.ai_router.executor.tool_registry.get("screen")
+        vision_service = getattr(screen_tool, "vision_service", None)
+        if vision_service is not None and hasattr(vision_service, "reconfigure"):
+            vision_service.reconfigure(config.get("vision", {}))
         public = self.config_store.public_settings()
         self.settings_changed.emit(public)
         self._broadcast("on_settings_changed", public)

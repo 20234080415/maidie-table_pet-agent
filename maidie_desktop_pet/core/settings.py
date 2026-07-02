@@ -32,7 +32,17 @@ PROACTIVE_DEFAULTS = {
     "random_chance": 0.05,
 }
 
-VISION_DEFAULTS = {"enabled": False, "interval_seconds": 60}
+VISION_DEFAULTS = {
+    "enabled": False,
+    "interval_seconds": 60,
+    "workspace_id": "",
+    "api_key": "",
+    "model": "qwen3-vl-flash",
+    "region": "cn-beijing",
+    "max_width": 1280,
+    "jpeg_quality": 85,
+    "cache_ttl_seconds": 5,
+}
 FENCE_DEFAULTS = {"show_overlay": True}
 
 
@@ -87,6 +97,13 @@ class ConfigStore:
             "proactive_cooldown_seconds": int(proactive.get("cooldown_seconds", 900)),
             "screen_awareness_enabled": bool(vision.get("enabled", False)),
             "screen_awareness_interval": int(vision.get("interval_seconds", 60)),
+            "vision_workspace_id": str(vision.get("workspace_id", "")),
+            "has_vision_api_key": bool(vision.get("api_key", "")),
+            "vision_model": str(vision.get("model", "qwen3-vl-flash")),
+            "vision_region": str(vision.get("region", "cn-beijing")),
+            "vision_max_width": int(vision.get("max_width", 1280)),
+            "vision_jpeg_quality": int(vision.get("jpeg_quality", 85)),
+            "vision_cache_ttl_seconds": int(vision.get("cache_ttl_seconds", 5)),
         }
 
     def update_user_settings(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -121,6 +138,15 @@ class ConfigStore:
             proactive["cooldown_seconds"] = max(30, int(values.get("proactive_cooldown_seconds", proactive.get("cooldown_seconds", 900))))
             vision["enabled"] = bool(values.get("screen_awareness_enabled", vision.get("enabled", False)))
             vision["interval_seconds"] = max(30, min(600, int(values.get("screen_awareness_interval", vision.get("interval_seconds", 60)))))
+            vision["workspace_id"] = str(values.get("vision_workspace_id", vision.get("workspace_id", ""))).strip()
+            new_vision_key = str(values.get("vision_api_key", "")).strip()
+            if new_vision_key:
+                vision["api_key"] = new_vision_key
+            vision["model"] = str(values.get("vision_model", vision.get("model", "qwen3-vl-flash"))).strip()
+            vision["region"] = str(values.get("vision_region", vision.get("region", "cn-beijing"))).strip()
+            vision["max_width"] = max(320, min(4096, int(values.get("vision_max_width", vision.get("max_width", 1280)))))
+            vision["jpeg_quality"] = max(40, min(100, int(values.get("vision_jpeg_quality", vision.get("jpeg_quality", 85)))))
+            vision["cache_ttl_seconds"] = max(0, min(60, int(values.get("vision_cache_ttl_seconds", vision.get("cache_ttl_seconds", 5)))))
             self._atomic_write(config)
             return deepcopy(config)
 

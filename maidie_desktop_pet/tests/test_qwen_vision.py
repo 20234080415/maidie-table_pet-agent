@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import unittest
+import os
 from types import SimpleNamespace
 from unittest.mock import Mock
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -75,6 +77,20 @@ class VisionServiceTests(unittest.TestCase):
         self.assertIs(first, second)
         capture.capture_active_window.assert_called_once_with()
         client.analyze_image.assert_called_once()
+
+    def test_saved_settings_reconfigure_client(self):
+        client = QwenVLClient("old", "old-workspace")
+        service = VisionService(client=client)
+        with patch.dict(os.environ, {}, clear=True):
+            service.reconfigure({
+                "api_key": "new-key", "workspace_id": "new-workspace",
+                "model": "qwen3-vl-flash", "region": "cn-beijing",
+                "max_width": 900, "jpeg_quality": 77, "cache_ttl_seconds": 9,
+            })
+        self.assertEqual(client.api_key, "new-key")
+        self.assertEqual(client.workspace_id, "new-workspace")
+        self.assertEqual(service.max_width, 900)
+        self.assertEqual(service.cache_ttl_seconds, 9)
 
 
 class VisionRouteTests(unittest.TestCase):

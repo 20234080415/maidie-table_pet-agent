@@ -58,6 +58,24 @@ class ConfigStoreTests(unittest.TestCase):
     def test_fence_overlay_is_enabled_by_default(self):
         self.assertTrue(self.store.load()["fence"]["show_overlay"])
 
+    def test_vision_settings_save_without_exposing_key(self):
+        self.store.update_user_settings({
+            "vision_workspace_id": "ws-123",
+            "vision_api_key": "vision-secret",
+            "vision_model": "qwen3-vl-flash",
+            "vision_region": "cn-beijing",
+            "vision_max_width": 1024,
+            "vision_jpeg_quality": 80,
+            "vision_cache_ttl_seconds": 8,
+        })
+        saved = self.store.load()["vision"]
+        public = self.store.public_settings()
+        self.assertEqual(saved["workspace_id"], "ws-123")
+        self.assertEqual(saved["api_key"], "vision-secret")
+        self.assertEqual(public["vision_max_width"], 1024)
+        self.assertTrue(public["has_vision_api_key"])
+        self.assertNotIn("vision-secret", repr(public))
+
 
 if __name__ == "__main__":
     unittest.main()

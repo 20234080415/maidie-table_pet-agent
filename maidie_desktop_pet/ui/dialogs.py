@@ -126,6 +126,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._build_personality_tab(), "性格")
         tabs.addTab(self._build_model_tab(), "模型与 API")
         tabs.addTab(self._build_network_tab(), "联网查询")
+        tabs.addTab(self._build_vision_tab(), "千问视觉")
         tabs.addTab(self._build_proactive_tab(), "主动行为")
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
@@ -254,6 +255,58 @@ class SettingsDialog(QDialog):
         layout.addRow("", note)
         return page
 
+    def _build_vision_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QFormLayout(page)
+        self.vision_workspace_id = QLineEdit(
+            self.settings.get("vision_workspace_id", "")
+        )
+        self.vision_workspace_id.setPlaceholderText("阿里云百炼 Workspace ID")
+        self.vision_api_key = QLineEdit()
+        self.vision_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.vision_api_key.setPlaceholderText(
+            "已配置；留空保持不变"
+            if self.settings.get("has_vision_api_key") else "输入 DASHSCOPE API Key"
+        )
+        self.vision_model = QLineEdit(
+            self.settings.get("vision_model", "qwen3-vl-flash")
+        )
+        self.vision_region = QComboBox()
+        self.vision_region.addItem("北京（cn-beijing）", "cn-beijing")
+        region_index = self.vision_region.findData(
+            self.settings.get("vision_region", "cn-beijing")
+        )
+        self.vision_region.setCurrentIndex(max(0, region_index))
+        self.vision_max_width = QSpinBox()
+        self.vision_max_width.setRange(320, 4096)
+        self.vision_max_width.setSuffix(" px")
+        self.vision_max_width.setValue(self.settings.get("vision_max_width", 1280))
+        self.vision_jpeg_quality = QSpinBox()
+        self.vision_jpeg_quality.setRange(40, 100)
+        self.vision_jpeg_quality.setValue(
+            self.settings.get("vision_jpeg_quality", 85)
+        )
+        self.vision_cache_ttl = QSpinBox()
+        self.vision_cache_ttl.setRange(0, 60)
+        self.vision_cache_ttl.setSuffix(" 秒")
+        self.vision_cache_ttl.setValue(
+            self.settings.get("vision_cache_ttl_seconds", 5)
+        )
+        note = QLabel(
+            "只有你明确要求看屏幕、窗口或图片时才会截图并发送给千问视觉；"
+            "截图仅在内存中处理，不会永久保存。环境变量配置优先于这里的设置。"
+        )
+        note.setWordWrap(True)
+        layout.addRow("Workspace ID", self.vision_workspace_id)
+        layout.addRow("API Key", self.vision_api_key)
+        layout.addRow("视觉模型", self.vision_model)
+        layout.addRow("地域", self.vision_region)
+        layout.addRow("图片最大宽度", self.vision_max_width)
+        layout.addRow("JPEG 质量", self.vision_jpeg_quality)
+        layout.addRow("短缓存", self.vision_cache_ttl)
+        layout.addRow("", note)
+        return page
+
     def _save(self) -> None:
         values = {
             "provider": self.provider.currentData(),
@@ -273,6 +326,13 @@ class SettingsDialog(QDialog):
             "proactive_cooldown_seconds": self.proactive_cooldown.value() * 60,
             "screen_awareness_enabled": self.screen_awareness_enabled.isChecked(),
             "screen_awareness_interval": self.screen_awareness_interval.value(),
+            "vision_workspace_id": self.vision_workspace_id.text().strip(),
+            "vision_api_key": self.vision_api_key.text().strip(),
+            "vision_model": self.vision_model.text().strip(),
+            "vision_region": self.vision_region.currentData(),
+            "vision_max_width": self.vision_max_width.value(),
+            "vision_jpeg_quality": self.vision_jpeg_quality.value(),
+            "vision_cache_ttl_seconds": self.vision_cache_ttl.value(),
         }
         if not values["base_url"] or not values["chat_model"] or not values["technical_model"]:
             return

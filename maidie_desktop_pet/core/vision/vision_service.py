@@ -28,6 +28,30 @@ class VisionService:
         self._cached_scope = ""
         self.logger = logging.getLogger(__name__)
 
+    def reconfigure(self, settings: dict[str, object]) -> None:
+        """Apply saved UI settings while keeping environment variables authoritative."""
+        self.client.api_key = os.getenv("DASHSCOPE_API_KEY") or str(settings.get("api_key", ""))
+        self.client.workspace_id = (os.getenv("DASHSCOPE_WORKSPACE_ID") or
+                                    str(settings.get("workspace_id", "")))
+        self.client.region = os.getenv("QWEN_VL_REGION") or str(
+            settings.get("region", "cn-beijing")
+        )
+        self.client.model = os.getenv("QWEN_VL_MODEL") or str(
+            settings.get("model", "qwen3-vl-flash")
+        )
+        self.client.base_url = self.client.build_base_url(
+            self.client.workspace_id, self.client.region
+        )
+        self.max_width = self._setting_int(settings, "max_width", "VISION_MAX_WIDTH", 1280)
+        self.jpeg_quality = self._setting_int(
+            settings, "jpeg_quality", "VISION_JPEG_QUALITY", 85
+        )
+        self.cache_ttl_seconds = float(self._setting_int(
+            settings, "cache_ttl_seconds", "VISION_CACHE_TTL_SECONDS", 5
+        ))
+        self._cached_context = None
+        self._cached_at = float("-inf")
+
     def capture_and_analyze(self, user_question: str,
                             scope: str = "active_window") -> VisionContext:
         now = self._clock()
@@ -65,4 +89,13 @@ class VisionService:
         try:
             return float(os.getenv(name, str(default)))
         except ValueError:
+            return default
+
+    @staticmethod
+    def _setting_int(settings: dict[str, object], key: str, env_name: str,
+                     default: int) -> int:
+        value = os.getenv(env_name, str(settings.get(key, default)))
+        try:
+            return int(value)
+        except (TypeError, ValueError):
             return default

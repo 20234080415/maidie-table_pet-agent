@@ -55,9 +55,11 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
     awareness = AwarenessContext(
         MouseTracker(idle_detector), WindowTracker(), AppTracker(), screen_reader, ClipboardTracker()
     )
+    vision_service = VisionService()
+    vision_service.reconfigure(vision_options)
     tool_registry = ToolRegistry([
         TimeTool(), WeatherTool(), SearchTool(network_plugin),
-        ScreenTool(awareness, VisionService()),
+        ScreenTool(awareness, vision_service),
         MemoryTool(memory), system_tool,
     ])
     personality_prompt = config_store.personality_prompt(config)
