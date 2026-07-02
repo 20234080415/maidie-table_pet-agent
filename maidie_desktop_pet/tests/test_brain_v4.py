@@ -4,7 +4,7 @@ import unittest
 
 from ai.client import AIClient, normalize_response
 from core.brain import BrainPlanner, BrainRouter, IntentClassifier, LLMIntentRouter, Synthesizer
-from core.tools import MemoryTool, ScreenTool, SearchTool, TimeTool, ToolRegistry
+from core.tools import MemoryTool, ScreenTool, SearchTool, SystemTool, TimeTool, ToolRegistry
 from core.tools.base import Tool
 
 
@@ -115,6 +115,21 @@ class BrainV4AcceptanceTests(unittest.TestCase):
         self.router.ask("今天心情怎么样呀", [])
         self.assertEqual(self.awareness.calls, 0)
         self.assertEqual(self.client.prompts[-1].count("工具数据：[]"), 1)
+
+
+    def test_planner_confirmed_cannot_bypass_system_confirmation(self):
+        confirmation_requests = []
+        system = SystemTool(confirmation_callback=lambda action, params:
+                            confirmation_requests.append((action, params)) or False)
+        router = BrainRouter(self.client, self.client, ToolRegistry([system]), self.memory)
+
+        result = router._execute_tool("system", "copy", {
+            "operation": "copy_clipboard", "text": "unsafe", "confirmed": True,
+        })
+
+        self.assertTrue(result["raw"]["denied"])
+        self.assertEqual(len(confirmation_requests), 1)
+        self.assertNotIn("confirmed", confirmation_requests[0][1])
 
 
 if __name__ == "__main__":

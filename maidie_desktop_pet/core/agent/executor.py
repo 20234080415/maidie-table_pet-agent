@@ -24,7 +24,9 @@ class ToolExecutor:
         return context
 
     def _run_step(self, tool_name: str, step: dict[str, Any], message: str) -> dict[str, Any]:
-        params = step.get("params", {}) if isinstance(step.get("params", {}), dict) else {}
+        raw_params = step.get("params", {}) if isinstance(step.get("params", {}), dict) else {}
+        # Plans are untrusted: confirmation can only come from the trusted broker path.
+        params = {key: value for key, value in raw_params.items() if key != "confirmed"}
         query = str(params.get("query") or message)
         if tool_name in ("time", "weather"):
             tool = self.tool_registry.get(tool_name)

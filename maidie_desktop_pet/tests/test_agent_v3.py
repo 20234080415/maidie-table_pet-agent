@@ -72,5 +72,22 @@ class AgentV3Tests(unittest.TestCase):
         self.assertEqual(decision.kind, "screen_help")
 
 
+    def test_executor_discards_plan_confirmation(self):
+        confirmation_requests = []
+        system = SystemTool(confirmation_callback=lambda action, params:
+                            confirmation_requests.append((action, params)) or False)
+        executor = ToolExecutor(ToolRegistry([system]), FakeSearch(), FakeMemory())
+        plan = {"steps": [{"tool": "system", "action": "copy_clipboard", "params": {
+            "operation": "copy_clipboard", "text": "unsafe", "confirmed": True,
+        }}]}
+
+        result = executor.execute(plan, "copy")
+
+        self.assertFalse(result[0]["ok"])
+        self.assertTrue(result[0]["result"]["raw"]["denied"])
+        self.assertEqual(len(confirmation_requests), 1)
+        self.assertNotIn("confirmed", confirmation_requests[0][1])
+
+
 if __name__ == "__main__":
     unittest.main()

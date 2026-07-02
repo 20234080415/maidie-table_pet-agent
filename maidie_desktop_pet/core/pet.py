@@ -12,6 +12,7 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from animation.direction_manager import DirectionManager
 from core.behavior import AutonomousBehaviorController, BehaviorKind
 from core.chat.chat_streamer import ChatStreamer
+from core.experience import AttentionManager, BehaviorOrchestrator, EmotionState
 from core.movement import Bounds, MovementController, Vec2
 from core.state import BehaviorPriority, PetState, StateMachine
 
@@ -56,6 +57,9 @@ class PetController(QObject):
         self.movement = MovementController(**(movement_options or {}))
         self.direction = DirectionManager()
         self.behavior = AutonomousBehaviorController()
+        self.emotion_state = EmotionState()
+        self.attention_manager = AttentionManager()
+        self.behavior_orchestrator = BehaviorOrchestrator()
         self.bounds = Bounds(0, 0, 1920, 1080)
         self.cursor = Vec2()
         self.cursor_chase = False
@@ -71,6 +75,10 @@ class PetController(QObject):
         self._request_poll_timer = QTimer(self)
         self._request_poll_timer.setInterval(15)
         self._request_poll_timer.timeout.connect(self._poll_request)
+        self._proactive_future: Any | None = None
+        self._proactive_poll_timer = QTimer(self)
+        self._proactive_poll_timer.setInterval(15)
+        self._proactive_poll_timer.timeout.connect(self._poll_proactive_future)
         self._result_ready.connect(self._handle_result)
         self._stream_delta_ready.connect(self._handle_stream_delta)
         self.chat_streamer = ChatStreamer(self)
@@ -90,6 +98,20 @@ class PetController(QObject):
     @property
     def state(self) -> PetState:
         return self.state_machine.state
+
+    @property
+    def dominant_emotion(self) -> str:
+        return self.emotion_state.get_dominant_emotion()
+
+    def animation_for_dominant_emotion(self) -> str:
+        """Translate the experience state without coupling EmotionState to UI assets."""
+        return {
+            "happy": "happy",
+            "thinking": "waiting",
+            "shy": "shy",
+            "concern": "sad",
+            "failed": "failed",
+        }.get(self.dominant_emotion, "idle")
 
     def on(self, event: str, callback: Callable[..., None]) -> None:
         self._listeners[event].append(callback)
@@ -224,11 +246,15 @@ class PetController(QObject):
         """Play a local head-pat reaction without spending an API request."""
         self.movement.stop()
         self._broadcast("on_headpat")
+        self.emotion_state.apply_event("headpat")
+        self.emotion_changed.emit(self.emotion_state.get_dominant_emotion())
         self._play_action("headpat")
 
     def on_facepoke(self) -> None:
         self.movement.stop()
         self._broadcast("on_facepoke")
+        self.emotion_state.apply_event("facepoke")
+        self.emotion_changed.emit(self.emotion_state.get_dominant_emotion())
         self._play_action("facepoke")
 
     def _play_action(self, name: str, force: bool = False) -> bool:
@@ -286,6 +312,7 @@ class PetController(QObject):
         self._pending_response = None
         self.chat_streamer.start()
         self.stream_started.emit({"source": self._pending_source})
+        self.emotion_state.apply_event("ai_thinking")
         self.emotion_changed.emit("thinking")
         self.movement.stop()
         target_state = PetState.REMINDING if proactive else PetState.THINKING
@@ -296,6 +323,10 @@ class PetController(QObject):
         memory_context = self.memory.prompt_context() if hasattr(self.memory, "prompt_context") else ""
         if memory_context:
             context.append({"memory": memory_context})
+        self._refresh_attention()
+        attention_context = self.attention_manager.context_for(message)
+        if attention_context:
+            context.append(attention_context)
         self._request_future = self._executor.submit(
             self._run_stream_request, message, context
         )
@@ -346,6 +377,7 @@ class PetController(QObject):
                 "source": self._pending_source,
             }
             self.request_failed.emit(error_message)
+            self.emotion_state.apply_event("tool_failure")
 
         response = {
             "text": str(result.get("text", "Maidie 在这里哦。")),
@@ -355,6 +387,9 @@ class PetController(QObject):
             "source": str(result.get("source", "chat")),
         }
         self._pending_response = response
+        if not failed:
+            event = "tool_success" if response["source"] not in {"chat", "codex"} else "ai_reply"
+            self.emotion_state.apply_event(event, response["emotion"])
         # Offline/tool fallbacks may return one complete value rather than raw
         # deltas. They still pass through the same sentence and pacing layers.
         if failed or not self.chat_streamer.received_text:
@@ -530,26 +565,74 @@ class PetController(QObject):
             self.set_state(motion_state, priority)
 
     def _proactive_tick(self) -> None:
-        if not self.proactive_runtime or self._busy:
+        if (not self.proactive_runtime or not self.proactive_runtime.engine.enabled
+                or self._busy):
             return
+        if self._proactive_future is not None and not self._proactive_future.done():
+            return
+        self._proactive_future = self._executor.submit(self.proactive_runtime.tick)
+        self._proactive_poll_timer.start()
+
+    def _poll_proactive_future(self) -> None:
+        future = self._proactive_future
+        if future is None or not future.done():
+            return
+        self._proactive_poll_timer.stop()
+        self._proactive_future = None
         try:
-            context, decision = self.proactive_runtime.tick()
-            if decision:
-                self.submit_text(decision.prompt, proactive=True)
-                self._pending_reaction = decision.action
-            elif self.proactive_runtime.engine.enabled and context.get("mouse_state") != "idle":
-                changed = self.set_state(PetState.WATCHING, BehaviorPriority.AUTONOMOUS,
-                                         900, animation="idle")
-                if changed:
-                    token = self._state_token
-                    QTimer.singleShot(950, lambda: self._recover_if_current(token))
-            elif float(context.get("idle_time", 0)) >= 300:
-                self._play_action("sleepy")
+            result = future.result()
         except Exception:
             self.logger.exception("Proactive Agent tick failed")
+            return
+        self._complete_proactive_result(result)
+
+    def _complete_proactive_result(self, result: tuple[dict[str, Any], Any]) -> None:
+        """Apply a worker result from the Qt-thread polling entry point."""
+        if self._busy or not self.proactive_runtime:
+            return
+        context, decision = result
+        self.attention_manager.update(context)
+        experience_decision = self.behavior_orchestrator.decide(
+            self.attention_manager.state,
+            self.emotion_state.get_dominant_emotion(),
+            float(context.get("idle_time", 0)),
+            str(context.get("window_title", "")),
+        )
+        if experience_decision:
+            self._broadcast("on_behavior_decision", experience_decision)
+        if decision:
+            self.submit_text(decision.prompt, proactive=True)
+            self._pending_reaction = decision.action
+        elif self.proactive_runtime.engine.enabled and context.get("mouse_state") != "idle":
+            changed = self.set_state(PetState.WATCHING, BehaviorPriority.AUTONOMOUS,
+                                     900, animation="idle")
+            if changed:
+                token = self._state_token
+                QTimer.singleShot(950, lambda: self._recover_if_current(token))
+        elif float(context.get("idle_time", 0)) >= 300:
+            self._play_action("sleepy")
+
+    def _refresh_attention(self) -> None:
+        """Refresh cheap foreground facts; OCR remains on the existing awareness cadence."""
+        if not self.proactive_runtime:
+            return
+        awareness = self.proactive_runtime.awareness
+        context: dict[str, Any] = {}
+        try:
+            context.update(awareness.window_tracker.snapshot())
+            if awareness.app_tracker:
+                context.update(awareness.app_tracker.snapshot())
+            screen_reader = getattr(awareness, "screen_reader", None)
+            cached = getattr(screen_reader, "_last_result", None)
+            if isinstance(cached, dict):
+                context["screen"] = dict(cached)
+            self.attention_manager.update(context)
+        except Exception:
+            self.logger.exception("Attention refresh failed")
 
     def shutdown(self) -> None:
         self._tick_timer.stop()
         self._proactive_timer.stop()
         self._request_poll_timer.stop()
+        self._proactive_poll_timer.stop()
         self._executor.shutdown(wait=False, cancel_futures=True)

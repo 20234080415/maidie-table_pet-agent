@@ -34,7 +34,9 @@ class BrainRouter:
         context = context or []
         intent = self.intent_router.classify(user_input, context)
         if intent in {"task", "screen", "code_task", "system_task"}:
-            plan = self.planner.plan_for_intent(user_input, intent, self.memory)
+            attention = next((item.get("attention") for item in reversed(context)
+                              if isinstance(item, dict) and "attention" in item), None)
+            plan = self.planner.plan_for_intent(user_input, intent, self.memory, attention)
             return self._run_plan(user_input, self._source_for_intent(intent), plan, context, on_delta)
         return self.synthesizer.synthesize(
             user_input, "chat", None, [], self._memory_context(), context, on_delta,
@@ -76,11 +78,14 @@ class BrainRouter:
         tool = self.tool_registry.get(name)
         if tool is None:
             return {"type": name, "raw": {"error": f"{name} unavailable"}, "source": "local"}
+        # Plan parameters are untrusted data, never proof of user authorization.
+        params = dict(params)
+        params.pop("confirmed", None)
         try:
             if name == "system" and hasattr(tool, "execute"):
                 operation = str(params.get("operation") or params.get("action") or "")
                 if operation:
-                    return tool.execute(operation, params, confirmed=bool(params.get("confirmed", False)))
+                    return tool.execute(operation, params)
             if name == "memory":
                 return tool.run(user_input, kind=str(params.get("kind", "long_term")),
                                 limit=int(params.get("limit", 20)))

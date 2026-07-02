@@ -14,14 +14,24 @@ class BrainPlanner:
         re.I,
     )
 
-    def plan_for_intent(self, user_input: str, intent: str, memory: Any = None) -> dict[str, Any]:
+    def plan_for_intent(self, user_input: str, intent: str, memory: Any = None,
+                        attention: dict[str, Any] | None = None) -> dict[str, Any]:
         if intent == "screen":
-            return self.screen_plan(user_input)
+            plan = self.screen_plan(user_input)
+            return self._with_attention(plan, attention)
         if intent == "code_task":
-            return self.code_plan(user_input)
+            plan = self.code_plan(user_input)
+            return self._with_attention(plan, attention)
         if intent == "system_task":
-            return self.system_plan(user_input)
-        return self.plan(user_input, memory)
+            plan = self.system_plan(user_input)
+            return self._with_attention(plan, attention)
+        return self._with_attention(self.plan(user_input, memory), attention)
+
+    @staticmethod
+    def _with_attention(plan: dict[str, Any], attention: dict[str, Any] | None) -> dict[str, Any]:
+        if attention:
+            return {**plan, "attention": dict(attention)}
+        return plan
 
     def plan(self, user_input: str, memory: Any = None) -> dict[str, Any]:
         text = str(user_input).strip()
