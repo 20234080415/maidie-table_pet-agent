@@ -11,9 +11,9 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from animation.direction_manager import DirectionManager
 from core.behavior import AutonomousBehaviorController, BehaviorKind
-from core.chat.chat_streamer import ChatStreamer
 from core.experience import AttentionManager, BehaviorOrchestrator, EmotionState
 from core.movement import Bounds, MovementController, Vec2
+from core.session import AISessionCoordinator
 from core.state import BehaviorPriority, PetState, StateMachine
 
 
@@ -32,8 +32,6 @@ class PetController(QObject):
     facing_changed = pyqtSignal(bool)
     emotion_changed = pyqtSignal(str)
     sentence_completed = pyqtSignal(str)
-    _result_ready = pyqtSignal(object)
-    _stream_delta_ready = pyqtSignal(str)
 
     def __init__(
         self,
@@ -63,28 +61,20 @@ class PetController(QObject):
         self.bounds = Bounds(0, 0, 1920, 1080)
         self.cursor = Vec2()
         self.cursor_chase = False
-        self._busy = False
-        self._pending_response: dict[str, str] | None = None
-        self._pending_message = ""
-        self._pending_source = "chat"
-        self._pending_reaction: str | None = None
         self._listeners: dict[str, list[Callable[..., None]]] = defaultdict(list)
         self._plugins: list[Any] = []
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="maidie-ai")
-        self._request_future: Any | None = None
-        self._request_poll_timer = QTimer(self)
-        self._request_poll_timer.setInterval(15)
-        self._request_poll_timer.timeout.connect(self._poll_request)
         self._proactive_future: Any | None = None
         self._proactive_poll_timer = QTimer(self)
         self._proactive_poll_timer.setInterval(15)
         self._proactive_poll_timer.timeout.connect(self._poll_proactive_future)
-        self._result_ready.connect(self._handle_result)
-        self._stream_delta_ready.connect(self._handle_stream_delta)
-        self.chat_streamer = ChatStreamer(self)
-        self.chat_streamer.text_ready.connect(self._present_stream_text)
-        self.chat_streamer.sentence_finished.connect(self.sentence_completed)
-        self.chat_streamer.finished.connect(self._complete_stream_response)
+        self.ai_session = AISessionCoordinator(
+            ai_router, self._executor, self.logger,
+            self._prepare_ai_request, self._show_stream_fragment,
+            self._on_ai_result, self._on_ai_response_completed,
+            self.sentence_completed.emit, self,
+        )
+        self.chat_streamer = self.ai_session.streamer
         self._last_tick = monotonic()
         self._state_token = 0
         self._proactive_timer = QTimer(self)
@@ -98,6 +88,55 @@ class PetController(QObject):
     @property
     def state(self) -> PetState:
         return self.state_machine.state
+
+    # Compatibility aliases while callers transition to AISessionCoordinator.
+    @property
+    def _busy(self) -> bool:
+        return self.ai_session.busy
+
+    @_busy.setter
+    def _busy(self, value: bool) -> None:
+        self.ai_session.busy = bool(value)
+
+    @property
+    def _pending_message(self) -> str:
+        return self.ai_session.pending_message
+
+    @_pending_message.setter
+    def _pending_message(self, value: str) -> None:
+        self.ai_session.pending_message = value
+
+    @property
+    def _pending_source(self) -> str:
+        return self.ai_session.pending_source
+
+    @_pending_source.setter
+    def _pending_source(self, value: str) -> None:
+        self.ai_session.pending_source = value
+
+    @property
+    def _pending_reaction(self) -> str | None:
+        return self.ai_session.pending_reaction
+
+    @_pending_reaction.setter
+    def _pending_reaction(self, value: str | None) -> None:
+        self.ai_session.pending_reaction = value
+
+    @property
+    def _pending_response(self) -> dict[str, str] | None:
+        return self.ai_session.pending_response
+
+    @_pending_response.setter
+    def _pending_response(self, value: dict[str, str] | None) -> None:
+        self.ai_session.pending_response = value
+
+    @property
+    def _request_future(self) -> Any | None:
+        return self.ai_session.future
+
+    @property
+    def _request_poll_timer(self) -> QTimer:
+        return self.ai_session.poll_timer
 
     @property
     def dominant_emotion(self) -> str:
@@ -297,21 +336,16 @@ class PetController(QObject):
             )
 
     def submit_text(self, message: str, proactive: bool = False) -> None:
-        message = message.strip()
-        if not message or self._busy:
-            return
-        self._busy = True
-        self._pending_message = message
+        self.ai_session.submit(message, proactive)
+
+    def _prepare_ai_request(self, message: str, proactive: bool) -> tuple[list[dict[str, Any]], str | None]:
         # Intent routing performs an API request. Keep it inside the worker's
         # normal BrainRouter flow instead of blocking the Qt event loop here
         # (and routing the same message a second time in ask_stream()).
-        self._pending_source = "chat"
-        self._pending_reaction = (
+        pending_reaction = (
             self.action_registry.match_message(message) if self.action_registry else None
         )
-        self._pending_response = None
-        self.chat_streamer.start()
-        self.stream_started.emit({"source": self._pending_source})
+        self.stream_started.emit({"source": "chat"})
         self.emotion_state.apply_event("ai_thinking")
         self.emotion_changed.emit("thinking")
         self.movement.stop()
@@ -327,22 +361,15 @@ class PetController(QObject):
         attention_context = self.attention_manager.context_for(message)
         if attention_context:
             context.append(attention_context)
-        self._request_future = self._executor.submit(
-            self._run_stream_request, message, context
-        )
-        self._request_poll_timer.start()
-
-    def _run_stream_request(self, message: str, context: list[dict[str, Any]]) -> dict[str, str]:
-        return self.ai_router.ask_stream(
-            message,
-            context,
-            lambda delta: self._stream_delta_ready.emit(delta),
-        )
+        return context, pending_reaction
 
     def _handle_stream_delta(self, delta: str) -> None:
-        self.chat_streamer.push_token(delta)
+        self.ai_session.handle_stream_delta(delta)
 
     def _present_stream_text(self, fragment: str) -> None:
+        self.ai_session.present_stream_text(fragment)
+
+    def _show_stream_fragment(self, fragment: str) -> None:
         if self.state != PetState.TALKING:
             self.set_state(
                 PetState.TALKING,
@@ -354,55 +381,27 @@ class PetController(QObject):
         self.message_delta.emit(fragment)
 
     def _poll_request(self) -> None:
-        future = self._request_future
-        if future is None or not future.done():
-            return
-        self._request_poll_timer.stop()
-        self._request_future = None
-        try:
-            self._result_ready.emit(future.result())
-        except Exception as exc:
-            self.logger.exception("AI request failed")
-            self._result_ready.emit({"error": str(exc)})
+        self.ai_session.poll_future()
 
     def _handle_result(self, result: dict[str, Any]) -> None:
-        failed = "error" in result
-        if "error" in result:
-            error_message = str(result["error"])
-            result = {
-                "text": "唔，脑内频道暂时断线了，请稍后再试。",
-                "emotion": "sad",
-                "action": "talk",
-                "state": "talking",
-                "source": self._pending_source,
-            }
+        self.ai_session.handle_result(result)
+
+    def _on_ai_result(self, response: dict[str, str], failed: bool,
+                      error_message: str | None) -> None:
+        if failed and error_message is not None:
             self.request_failed.emit(error_message)
             self.emotion_state.apply_event("tool_failure")
-
-        response = {
-            "text": str(result.get("text", "Maidie 在这里哦。")),
-            "emotion": str(result.get("emotion", "idle")),
-            "action": str(result.get("action", "talk")),
-            "state": str(result.get("state", "talking")),
-            "source": str(result.get("source", "chat")),
-        }
-        self._pending_response = response
         if not failed:
             event = "tool_success" if response["source"] not in {"chat", "codex"} else "ai_reply"
             self.emotion_state.apply_event(event, response["emotion"])
-        # Offline/tool fallbacks may return one complete value rather than raw
-        # deltas. They still pass through the same sentence and pacing layers.
-        if failed or not self.chat_streamer.received_text:
-            self.chat_streamer.push_token(response["text"])
-        self.chat_streamer.finish()
 
     def _complete_stream_response(self) -> None:
-        response = self._pending_response
-        if response is None:
-            return
-        self._busy = False
-        if self._pending_reaction:
-            animation = self._pending_reaction
+        self.ai_session.complete_stream_response()
+
+    def _on_ai_response_completed(self, message: str, response: dict[str, str],
+                                  pending_reaction: str | None) -> None:
+        if pending_reaction:
+            animation = pending_reaction
         elif response["source"] == "codex":
             animation = "review"
         elif response["emotion"] in ("happy", "excited"):
@@ -427,23 +426,21 @@ class PetController(QObject):
             token = self._state_token
             QTimer.singleShot(900, lambda: self._recover_if_current(token))
         self.message_received.emit(response)
-        self.memory.save(self._pending_message, response["text"])
+        self.memory.save(message, response["text"])
         if (
             hasattr(self.memory, "save_extracted")
             and hasattr(self.ai_router, "extract_memories")
             and (
                 not hasattr(self.memory, "can_extract")
-                or self.memory.can_extract(self._pending_message, response["text"])
+                or self.memory.can_extract(message, response["text"])
             )
         ):
             self._executor.submit(
                 self._extract_and_store_memories,
-                self._pending_message,
+                message,
                 response["text"],
             )
         self._broadcast("on_message", response)
-        self._pending_reaction = None
-        self._pending_response = None
 
     def _extract_and_store_memories(self, message: str, response: str) -> None:
         try:
@@ -633,6 +630,6 @@ class PetController(QObject):
     def shutdown(self) -> None:
         self._tick_timer.stop()
         self._proactive_timer.stop()
-        self._request_poll_timer.stop()
+        self.ai_session.shutdown()
         self._proactive_poll_timer.stop()
         self._executor.shutdown(wait=False, cancel_futures=True)
