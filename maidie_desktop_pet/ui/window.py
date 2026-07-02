@@ -44,6 +44,8 @@ class PetWindow(QWidget):
         self.fence_overlay = FenceOverlayWindow() if (fence_options or {}).get(
             "show_overlay", True
         ) else None
+        if self.fence_overlay is not None:
+            self.fence_overlay.rect_change_requested.connect(controller.update_fence_rect)
         if confirmation_broker:
             confirmation_broker.requested.connect(self._confirm_system_action)
 

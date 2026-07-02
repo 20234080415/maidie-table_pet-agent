@@ -8,7 +8,7 @@ from unittest.mock import Mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QPoint, QRect, Qt
 from PyQt6.QtWidgets import QApplication
 
 from core.behavior import AutonomousBehaviorController
@@ -214,6 +214,16 @@ class FenceControllerIntegrationTests(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         controller.shutdown()
 
+    def test_user_edited_rect_is_clamped_and_keeps_pet_inside(self):
+        controller = self.make_controller()
+        final_rect = controller.update_fence_rect((-200, -100, 120, 140))
+        self.assertEqual(final_rect.left, 0)
+        self.assertEqual(final_rect.top, 0)
+        self.assertTrue(controller.fence.contains_pet(
+            controller.movement.position.x, controller.movement.position.y, 100, 100
+        ))
+        controller.shutdown()
+
 
 class FenceOverlayTests(unittest.TestCase):
     @classmethod
@@ -238,13 +248,26 @@ class FenceOverlayTests(unittest.TestCase):
         self.assertTrue(flags & Qt.WindowType.Tool)
         self.assertTrue(flags & Qt.WindowType.WindowStaysOnTopHint)
         self.assertTrue(flags & Qt.WindowType.WindowDoesNotAcceptFocus)
-        self.assertTrue(flags & Qt.WindowType.WindowTransparentForInput)
-        self.assertTrue(self.overlay.testAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents
-        ))
         self.assertTrue(self.overlay.testAttribute(
             Qt.WidgetAttribute.WA_ShowWithoutActivating
         ))
+
+    def test_drag_geometry_moves_and_resizes(self):
+        start = QRect(100, 120, 360, 260)
+        self.assertEqual(
+            self.overlay._geometry_for_drag(start, QPoint(30, -20), "move"),
+            QRect(130, 100, 360, 260),
+        )
+        self.assertEqual(
+            self.overlay._geometry_for_drag(start, QPoint(40, 25), "bottom_right"),
+            QRect(100, 120, 400, 285),
+        )
+
+    def test_top_center_is_move_handle_and_edges_are_resize_handles(self):
+        self.overlay.resize(360, 260)
+        self.assertEqual(self.overlay._interaction_at(QPoint(180, 2)), "move")
+        self.assertEqual(self.overlay._interaction_at(QPoint(2, 2)), "top_left")
+        self.assertEqual(self.overlay._interaction_at(QPoint(2, 130)), "left")
 
     def test_pet_window_shows_and_hides_overlay_with_fence(self):
         controller = PetController(object(), _Memory(), logger=Mock())

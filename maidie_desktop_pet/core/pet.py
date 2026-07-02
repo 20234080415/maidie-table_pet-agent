@@ -305,6 +305,35 @@ class PetController(QObject):
             self._emit_fence_feedback("fence_disabled", "celebrate")
             self._log_fence("fence_disabled")
 
+    def update_fence_rect(self, rect: Any) -> Bounds | None:
+        """Apply a user-edited fence rectangle and keep it inside the screen."""
+        if not self.fence.is_enabled():
+            return None
+        if isinstance(rect, Bounds):
+            left, top, right, bottom = rect.left, rect.top, rect.right, rect.bottom
+        elif hasattr(rect, "x") and hasattr(rect, "width"):
+            left, top = float(rect.x()), float(rect.y())
+            right, bottom = left + float(rect.width()), top + float(rect.height())
+        else:
+            left, top, right, bottom = map(float, rect)
+        min_width = self.movement.window_width + self.fence.padding * 2
+        min_height = self.movement.window_height + self.fence.padding * 2
+        width = min(max(abs(right - left), min_width), self.bounds.right - self.bounds.left)
+        height = min(max(abs(bottom - top), min_height), self.bounds.bottom - self.bounds.top)
+        left = max(self.bounds.left, min(self.bounds.right - width, min(left, right)))
+        top = max(self.bounds.top, min(self.bounds.bottom - height, min(top, bottom)))
+        final_rect = Bounds(left, top, left + width, top + height)
+        self.fence.enable(final_rect)
+        x, y = self.fence.clamp_point(
+            self.movement.position.x, self.movement.position.y,
+            self.movement.window_width, self.movement.window_height,
+        )
+        if (x, y) != (self.movement.position.x, self.movement.position.y):
+            self.sync_geometry(x, y, self.movement.window_width, self.movement.window_height)
+            self.position_requested.emit(x, y)
+        self.fence_changed.emit(final_rect)
+        return final_rect
+
     def _emit_fence_feedback(self, event: str, action: str) -> None:
         text = self.fence.dialogues.get(event)
         self._log_fence("fence_dialogue_event", dialogue_event=event)
