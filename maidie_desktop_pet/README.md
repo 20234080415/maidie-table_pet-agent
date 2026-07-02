@@ -129,6 +129,27 @@ hatch-pet WebP 动画图集和 DeepSeek/OpenAI 兼容接口，具备透明置顶
 - 输入框按 `Esc`、失去焦点、发送完成或 10 秒无操作后自动收起。
 - 输入过程中无操作计时会自动重置。
 
+### 围栏模式
+
+- 右键 Maidie，选择“开启围栏模式”或“解除围栏模式”。
+- 开启后会显示轻量、半透明的圆角围栏边框；边框不抢焦点，也不会进入任务栏。
+- 拖动围栏顶部中央的短条可以移动整个围栏。
+- 拖动四条边可以改变宽度或高度，拖动四个角可以同时改变宽高。
+- 围栏中央保持鼠标穿透，不影响点击桌面、其他应用和 Maidie；只有细边框用于移动和缩放。
+- 围栏会被限制在当前屏幕内，最小尺寸会保证能够容纳 Maidie。
+- 调整围栏后，如果 Maidie 位于新范围外，会自动回到最近的有效位置。
+- 自动游走、手动拖拽和 snapback 都使用调整后的最终围栏范围。
+
+可通过配置关闭围栏边框显示：
+
+```json
+{
+  "fence": {
+    "show_overlay": true
+  }
+}
+```
+
 ### AI 与聊天
 
 - DeepSeek/OpenAI Chat Completions 兼容接口。
@@ -324,6 +345,9 @@ config/config.json
     "minimum_height": 43,
     "always_on_top": true,
     "opacity": 1.0
+  },
+  "fence": {
+    "show_overlay": true
   }
 }
 ```
@@ -351,6 +375,7 @@ config/config.json
 | `window.minimum_width/height` | 允许缩小的下限 |
 | `window.always_on_top` | 是否始终置顶 |
 | `window.opacity` | 整体窗口透明度，范围 `0.0–1.0` |
+| `fence.show_overlay` | 是否显示可移动、可缩放的半透明围栏边框；默认 `true` |
 
 安全提示：`config.json` 中的 Key 是明文。不要把包含真实 Key 的配置提交到公开仓库、
 截图或发送给他人；长期使用时优先选择环境变量。
@@ -526,6 +551,7 @@ maidie_desktop_pet/
 │   ├── behavior.py             # 自主行为规划
 │   ├── brain/                  # LLM-first 路由、Planner 与人格合成
 │   ├── movement.py             # 速度、加速度与边界
+│   ├── fence.py                # 围栏范围、clamp 与 snapback 约束
 │   ├── pet.py                  # 唯一中央控制器
 │   ├── settings.py             # 配置持久化与热更新
 │   ├── state.py                # 状态机与行为优先级
@@ -542,6 +568,7 @@ maidie_desktop_pet/
 │   ├── bubble.py               # 跟随式流消息气泡
 │   ├── chat_input.py           # 跟随式聊天输入框
 │   ├── dialogs.py              # 最近聊天、人格和模型设置
+│   ├── fence_overlay.py        # 可移动、可缩放且中央穿透的围栏边框
 │   ├── resize_handle.py        # 奶油白缩放角标
 │   ├── sprite.py               # 高 DPI 角色渲染与视线跟随
 │   └── window.py               # 透明桌面窗口
