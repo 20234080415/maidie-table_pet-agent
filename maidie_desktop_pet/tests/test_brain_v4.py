@@ -77,7 +77,7 @@ class BrainV4AcceptanceTests(unittest.TestCase):
 
         router = LLMIntentRouter(BrokenClient(), IntentClassifier())
         self.assertEqual(router.classify("你能看到我屏幕吗"), "screen")
-        self.assertEqual(router.last_route["source"], "fallback")
+        self.assertEqual(router.last_route["source"], "explicit")
 
     def test_planner_execution(self):
         plan = BrainPlanner().plan("明天天气适不适合跑步", self.memory)

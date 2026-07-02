@@ -31,6 +31,7 @@ Return ONLY JSON:
 Rules:
 - Prefer task when tools are needed
 - Prefer screen when user refers to desktop state
+- Phrases such as "这个题", "这个怎么写", "这个报错", "这里", "屏幕上", or "当前窗口" are screen
 - Prefer code_task for coding/debug requests
 - Technical documentation, API meaning, and programming knowledge questions are code_task
 - A casual statement of interest (for example "I am interested in CMake") is chat unless it asks a question or requests work
@@ -47,6 +48,14 @@ Rules:
         return str(route["intent"])
 
     def route(self, user_input: str, context: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        if self.fallback.classify(user_input) == "screen":
+            self.last_route = {
+                "intent": "screen",
+                "confidence": 1.0,
+                "reason": "explicit screen reference",
+                "source": "explicit",
+            }
+            return self.last_route
         try:
             route = self._route_with_llm(user_input, context or [])
             self.last_route = {**route, "source": "llm"}

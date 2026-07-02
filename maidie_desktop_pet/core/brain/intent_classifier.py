@@ -7,6 +7,7 @@ class IntentClassifier:
     """Regex fallback used only when the LLM intent router fails."""
 
     SCREEN = re.compile(
+        r"看(?:看)?(?:我的)?屏幕|看屏幕|这个题|这个怎么写|这个报错|这里|屏幕上|当前窗口|"
         r"你能.*(?:看到|看见).*(?:屏幕|桌面)|我在(?:干嘛|做什么)|"
         r"你知道我在(?:干嘛|做什么|写代码)|你能监控我吗|"
         r"(?:屏幕|桌面).*(?:内容|有什么|是什么)|"

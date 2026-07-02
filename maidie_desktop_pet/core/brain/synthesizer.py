@@ -23,7 +23,9 @@ class Synthesizer:
                    technical: bool = False) -> dict[str, str]:
         client = self.codex_client if technical else self.chat_client
         prompt = self._prompt(user_input, source, plan, tool_data, memory_context)
-        if source != "chat" and not self._client_ready(client):
+        if source == "screen" and self._screen_failure(tool_data):
+            normalized = self._local_fallback(source, tool_data)
+        elif source != "chat" and not self._client_ready(client):
             normalized = self._local_fallback(source, tool_data)
         else:
             try:
@@ -50,7 +52,18 @@ class Synthesizer:
     def _local_fallback(source: str, tool_data: list[dict[str, Any]]) -> dict[str, str]:
         successful = [item.get("data", {}) for item in tool_data if item.get("ok")]
         if not successful:
-            text = "这次没拿到可靠结果，稍后再试试嘛。"
+            failed_screen = next((item.get("data", {}).get("raw", {}) for item in tool_data
+                                  if item.get("tool") == "screen"), {})
+            code = str(failed_screen.get("error_code", ""))
+            detail = str(failed_screen.get("error", ""))
+            if code == "ocr_disabled":
+                text = "屏幕 OCR 当前未启用，所以我还读不到屏幕文字；请先在设置中开启屏幕理解。"
+            elif code == "no_external_window":
+                text = "当前前台是 Maidie 自己，且没有找到可读取的外部窗口，请先切回题目或报错窗口再试。"
+            elif source == "screen":
+                text = f"屏幕读取失败：{detail or '截图或 OCR 没有返回可用数据'}。"
+            else:
+                text = "这次没拿到可靠结果，稍后再试试嘛。"
         else:
             data = successful[0]
             raw = data.get("raw", {}) if isinstance(data, dict) else {}
@@ -60,14 +73,20 @@ class Synthesizer:
             elif kind == "weather":
                 text = f"{raw.get('city', '')}气温 {raw.get('temperature', '未知')}，天气 {raw.get('forecast', '未知')}。"
             elif kind == "screen":
-                text = (f"你正在 {raw.get('app', '当前应用')} 里，"
-                        f"看起来是在{raw.get('context', '处理事情')}呢。")
+                screen_text = str(raw.get("screen_text") or raw.get("screenshot_summary") or "").strip()
+                text = (screen_text if screen_text else
+                        f"当前外部窗口是 {raw.get('window') or raw.get('app', '未知窗口')}，"
+                        f"场景为 {raw.get('context', 'unknown')}。")
             elif kind == "search":
                 text = str(raw.get("summary") or raw.get("error") or "暂时没查到可靠资料。")
             else:
                 text = "我已经记下相关情况啦。"
         return {"text": text, "emotion": "thinking", "action": "talk", "state": "talking",
                 "source": source}
+
+    @staticmethod
+    def _screen_failure(tool_data: list[dict[str, Any]]) -> bool:
+        return any(item.get("tool") == "screen" and not item.get("ok") for item in tool_data)
 
     def _prompt(self, user_input: str, source: str, plan: dict[str, Any] | None,
                 tool_data: list[dict[str, Any]], memory_context: str) -> str:

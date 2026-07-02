@@ -32,6 +32,7 @@ class ScreenReader:
         self.enabled = enabled
         self.interval_seconds = max(10.0, float(interval_seconds))
         self._screenshot_provider = screenshot_provider or self._grab_screen
+        self._screenshot_source = "full_screen"
         self._ocr_provider = ocr_provider or self._ocr
         self._clock = clock
         self.tesseract_path = tesseract_path
@@ -41,10 +42,10 @@ class ScreenReader:
 
     def read(self, force: bool = False) -> dict[str, Any]:
         now = self._clock()
-        # A forced read represents an explicit user request. Background reads still
-        # obey the opt-in setting, while direct awareness questions may use OCR.
-        if not self.enabled and not force:
-            return self._empty("disabled")
+        if not self.enabled:
+            result = self._empty("disabled")
+            result.update({"error": "OCR is disabled", "error_code": "ocr_disabled"})
+            return result
         if not force and now - self._last_read < self.interval_seconds:
             return {**self._last_result, "status": "cached"}
         self._last_read = now
@@ -59,17 +60,20 @@ class ScreenReader:
             changed = bool(digest and self._last_hash and digest != self._last_hash)
             self._last_hash = digest or self._last_hash
             self._last_result = {"screen_text": text, "apps_detected": apps, "context": context,
-                                 "confidence": round(confidence, 3), "changed": changed}
+                                 "confidence": round(confidence, 3), "changed": changed,
+                                 "status": "ok", "screenshot_source": self._screenshot_source,
+                                 "ocr_enabled": True, "ocr_text_length": len(text)}
             return dict(self._last_result)
         except Exception as exc:
             result = self._empty("error")
-            result["error"] = str(exc)
+            result.update({"error": str(exc), "error_code": "screen_read_failed"})
             return result
 
-    @staticmethod
-    def _empty(reason: str) -> dict[str, Any]:
+    def _empty(self, reason: str) -> dict[str, Any]:
         return {"screen_text": "", "apps_detected": [], "context": "unknown",
-                "confidence": 0.0, "changed": False, "status": reason}
+                "confidence": 0.0, "changed": False, "status": reason,
+                "screenshot_source": "failed", "ocr_enabled": bool(self.enabled),
+                "ocr_text_length": 0}
 
     @staticmethod
     def _grab_screen() -> Any:
