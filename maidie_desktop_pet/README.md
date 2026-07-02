@@ -1,5 +1,8 @@
 # Maidie Desktop Pet
 
+完整架构、已实现能力、安全边界、测试状态和已知限制请参阅
+[技术说明与能力现状](docs/TECHNICAL_OVERVIEW.md)。
+
 ## Agent 能力总览
 
 ### Maidie Core Brain V4

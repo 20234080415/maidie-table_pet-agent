@@ -1,9 +1,9 @@
 from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QTextCursor
-from PyQt6.QtWidgets import QTextBrowser
+from PyQt6.QtWidgets import QTextBrowser, QWidget
 
 
-class SpeechBubble(QTextBrowser):
+class SpeechBubble(QWidget):
     layout_changed = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -16,11 +16,13 @@ class SpeechBubble(QTextBrowser):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setReadOnly(True)
-        self.setFrameShape(QTextBrowser.Shape.NoFrame)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._text_view = QTextBrowser(self)
+        self._text_view.setReadOnly(True)
+        self._text_view.setFrameShape(QTextBrowser.Shape.NoFrame)
+        self._text_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._text_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._text_view.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setMinimumWidth(120)
         self.setMaximumWidth(260)
         self.setMaximumHeight(240)
@@ -31,13 +33,15 @@ class SpeechBubble(QTextBrowser):
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self.hide)
         self._apply_tail_margins()
-        self.setStyleSheet("""
+        self._text_view.setStyleSheet("""
             QTextBrowser { background: transparent; color: #4a2938; border: none;
               font-size: 14px;
               font-family: 'Microsoft YaHei UI', 'Microsoft YaHei', 'SimSun'; }
         """)
-        self.viewport().setStyleSheet("background: transparent;")
-        self._scroll_animation = QPropertyAnimation(self.verticalScrollBar(), b"value", self)
+        self._text_view.viewport().setStyleSheet("background: transparent;")
+        self._scroll_animation = QPropertyAnimation(
+            self._text_view.verticalScrollBar(), b"value", self
+        )
         self._scroll_animation.setDuration(120)
         self._scroll_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._size_animation = QPropertyAnimation(self, b"size", self)
@@ -143,12 +147,12 @@ class SpeechBubble(QTextBrowser):
         self._hide_timer.start(duration_ms)
 
     def _insert_text(self, fragment: str) -> None:
-        cursor = self.textCursor()
+        cursor = self._text_view.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         cursor.insertText(fragment)
-        self.setTextCursor(cursor)
+        self._text_view.setTextCursor(cursor)
         self._fit_content(animate=True)
-        bar = self.verticalScrollBar()
+        bar = self._text_view.verticalScrollBar()
         self._scroll_animation.stop()
         self._scroll_animation.setStartValue(bar.value())
         self._scroll_animation.setEndValue(bar.maximum())
@@ -164,7 +168,9 @@ class SpeechBubble(QTextBrowser):
         horizontal = self.contentsMargins().left() + self.contentsMargins().right() + 8
         vertical = self.contentsMargins().top() + self.contentsMargins().bottom() + 8
         lines = (self.toPlainText() or "…").splitlines() or ["…"]
-        natural_width = max(self.fontMetrics().horizontalAdvance(line) for line in lines)
+        natural_width = max(
+            self._text_view.fontMetrics().horizontalAdvance(line) for line in lines
+        )
         width = max(
             self.minimumWidth(),
             min(self.maximumWidth(), natural_width + horizontal + 14),
@@ -181,14 +187,25 @@ class SpeechBubble(QTextBrowser):
             self.resize(target)
         # Keep the desktop bubble visually clean; the hidden scrollbar still
         # provides the animated viewport offset used above.
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._text_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._text_view.setGeometry(self.contentsRect())
         self.layout_changed.emit()
 
     def scale_for_window(self, width: int) -> None:
         scale = max(0.8, min(1.45, width / 320))
-        font = self.font()
+        font = self._text_view.font()
         font.setPixelSize(max(12, int(14 * scale)))
-        self.setFont(font)
+        self._text_view.setFont(font)
+        self._fit_content(animate=self.isVisible())
+
+    def clear(self) -> None:
+        self._text_view.clear()
+
+    def document(self):
+        return self._text_view.document()
+
+    def toPlainText(self) -> str:
+        return self._text_view.toPlainText()

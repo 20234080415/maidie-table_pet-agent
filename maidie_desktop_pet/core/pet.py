@@ -67,6 +67,10 @@ class PetController(QObject):
         self._listeners: dict[str, list[Callable[..., None]]] = defaultdict(list)
         self._plugins: list[Any] = []
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="maidie-ai")
+        self._request_future: Any | None = None
+        self._request_poll_timer = QTimer(self)
+        self._request_poll_timer.setInterval(15)
+        self._request_poll_timer.timeout.connect(self._poll_request)
         self._result_ready.connect(self._handle_result)
         self._stream_delta_ready.connect(self._handle_stream_delta)
         self.chat_streamer = ChatStreamer(self)
@@ -272,7 +276,10 @@ class PetController(QObject):
             return
         self._busy = True
         self._pending_message = message
-        self._pending_source = self.ai_router.classify(message)
+        # Intent routing performs an API request. Keep it inside the worker's
+        # normal BrainRouter flow instead of blocking the Qt event loop here
+        # (and routing the same message a second time in ask_stream()).
+        self._pending_source = "chat"
         self._pending_reaction = (
             self.action_registry.match_message(message) if self.action_registry else None
         )
@@ -289,8 +296,10 @@ class PetController(QObject):
         memory_context = self.memory.prompt_context() if hasattr(self.memory, "prompt_context") else ""
         if memory_context:
             context.append({"memory": memory_context})
-        future = self._executor.submit(self._run_stream_request, message, context)
-        future.add_done_callback(self._finish_request)
+        self._request_future = self._executor.submit(
+            self._run_stream_request, message, context
+        )
+        self._request_poll_timer.start()
 
     def _run_stream_request(self, message: str, context: list[dict[str, Any]]) -> dict[str, str]:
         return self.ai_router.ask_stream(
@@ -313,7 +322,12 @@ class PetController(QObject):
             self.emotion_changed.emit("speaking")
         self.message_delta.emit(fragment)
 
-    def _finish_request(self, future: Any) -> None:
+    def _poll_request(self) -> None:
+        future = self._request_future
+        if future is None or not future.done():
+            return
+        self._request_poll_timer.stop()
+        self._request_future = None
         try:
             self._result_ready.emit(future.result())
         except Exception as exc:
@@ -537,4 +551,5 @@ class PetController(QObject):
     def shutdown(self) -> None:
         self._tick_timer.stop()
         self._proactive_timer.stop()
+        self._request_poll_timer.stop()
         self._executor.shutdown(wait=False, cancel_futures=True)

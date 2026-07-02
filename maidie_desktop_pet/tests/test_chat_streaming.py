@@ -120,6 +120,21 @@ class StreamingUiTests(unittest.TestCase):
         self.assertEqual(bubble.size(), target_size)
         bubble.close()
 
+    def test_bubble_has_an_opaque_readable_background(self):
+        bubble = SpeechBubble()
+        bubble.begin_stream()
+        bubble.append_text("回复清晰可见。")
+        self._wait_until(
+            lambda: bubble._size_animation.state() == QAbstractAnimation.State.Stopped
+        )
+        image = bubble.grab().toImage()
+        background = image.pixelColor(10, image.height() // 2)
+
+        self.assertGreater(background.alpha(), 220)
+        self.assertGreater(background.red(), 230)
+        self.assertGreater(background.green(), 225)
+        bubble.close()
+
     def test_first_visible_fragment_syncs_speaking_animation(self):
         controller = PetController(_Router(), _Memory())
         emotions: list[str] = []

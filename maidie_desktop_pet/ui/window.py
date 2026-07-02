@@ -37,6 +37,7 @@ class PetWindow(QWidget):
         self._resize = EdgeResizeController(self)
         self._gesture = PetGestureRecognizer()
         self._gesture_consumed = False
+        self._positioning_overlays = False
         self._dialog = None
         self.confirmation_broker = confirmation_broker
         if confirmation_broker:
@@ -311,8 +312,19 @@ class PetWindow(QWidget):
 
     def _position_overlays(self) -> None:
         """Position floating UI without changing the character's layout size."""
-        if not hasattr(self, "bubble") or not hasattr(self, "chat_input"):
+        if (
+            self._positioning_overlays
+            or not hasattr(self, "bubble")
+            or not hasattr(self, "chat_input")
+        ):
             return
+        self._positioning_overlays = True
+        try:
+            self._position_overlays_once()
+        finally:
+            self._positioning_overlays = False
+
+    def _position_overlays_once(self) -> None:
         bubble_width = min(max(120, self.width() - 24), 300)
         self.bubble.setMinimumWidth(min(120, bubble_width))
         self.bubble.setMaximumWidth(bubble_width)

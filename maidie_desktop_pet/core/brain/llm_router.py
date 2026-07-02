@@ -32,7 +32,9 @@ Rules:
 - Prefer task when tools are needed
 - Prefer screen when user refers to desktop state
 - Prefer code_task for coding/debug requests
-- Default to chat only when purely emotional conversation
+- Technical documentation, API meaning, and programming knowledge questions are code_task
+- A casual statement of interest (for example "I am interested in CMake") is chat unless it asks a question or requests work
+- Default to chat for emotional conversation and casual statements
 """
 
     def __init__(self, client: Any, fallback: IntentClassifier | None = None) -> None:

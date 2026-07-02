@@ -8,6 +8,11 @@ class BrainPlanner:
     """Builds deterministic data plans and never produces user-facing prose."""
 
     DECISION = re.compile(r"适不适合|是否适合|适合.*吗|要不要|该不该|是否应该|建议|推荐|should", re.I)
+    TECHNICAL_LOOKUP = re.compile(
+        r"查|搜索|资料|文档|官网|是什么|什么意思|有哪些|作用|怎么用|如何(?:使用|配置)|"
+        r"\b(?:search|look up|docs?|documentation|what is|what does|how (?:to|do))\b",
+        re.I,
+    )
 
     def plan_for_intent(self, user_input: str, intent: str, memory: Any = None) -> dict[str, Any]:
         if intent == "screen":
@@ -46,8 +51,14 @@ class BrainPlanner:
 
     @staticmethod
     def code_plan(user_input: str) -> dict[str, Any]:
-        return {"goal": str(user_input).strip(), "steps": [
-            BrainPlanner._step("codex", "分析代码任务并给出可执行修复资料", {"query": str(user_input).strip()})
+        text = str(user_input).strip()
+        if BrainPlanner.TECHNICAL_LOOKUP.search(text):
+            query = f"{text} official documentation"
+            return {"goal": text, "steps": [
+                BrainPlanner._step("search", "读取技术文档", {"query": query})
+            ]}
+        return {"goal": text, "steps": [
+            BrainPlanner._step("codex", "分析代码任务并给出可执行修复资料", {"query": text})
         ]}
 
     @staticmethod
