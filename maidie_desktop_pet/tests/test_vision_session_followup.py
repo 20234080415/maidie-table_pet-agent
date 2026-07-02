@@ -6,6 +6,7 @@ from unittest.mock import Mock
 from PIL import Image
 
 from core.brain import BrainRouter
+from core.session.thinking_feedback import ThinkingFeedbackPool
 from core.tools import ScreenTool, ToolRegistry
 from core.vision import ScreenCapture, VisionContext, VisionService, VisionSession
 
@@ -53,7 +54,9 @@ class VisionInteractionTests(unittest.TestCase):
             screen_summary="IDE traceback", visible_text="ValueError",
             task_type="code_error", confidence=0.9,
         )
-        self.service = VisionService(self.capture, self.vl_client, clock=lambda: 10)
+        self.service = VisionService(
+            self.capture, self.vl_client, clock=lambda: 10, cursor_delay_seconds=0
+        )
         client = _Client()
         registry = ToolRegistry([ScreenTool(vision_service=self.service)])
         self.router = BrainRouter(client, client, registry, _Memory())
@@ -114,6 +117,23 @@ class CursorRegionTests(unittest.TestCase):
         image = capture.capture_cursor_region(1000, 800)
         self.assertEqual(calls[0]["bbox"], (0, 0, 1000, 800))
         self.assertEqual(image.size, (1000, 800))
+
+    def test_cursor_capture_waits_before_reading_pointer(self):
+        capture = Mock()
+        capture.capture_cursor_region.return_value = Image.new("RGB", (20, 20))
+        client = Mock()
+        client.analyze_image.return_value = VisionContext(screen_summary="button")
+        sleeper = Mock()
+        service = VisionService(
+            capture, client, clock=lambda: 10, cursor_delay_seconds=3, sleeper=sleeper
+        )
+        service.capture_and_analyze("看鼠标这块", scope="cursor_region")
+        sleeper.assert_called_once_with(3.0)
+        capture.capture_cursor_region.assert_called_once_with()
+
+    def test_cursor_request_explains_the_delay(self):
+        pool = ThinkingFeedbackPool(chooser=lambda values: values[0])
+        self.assertIn("三秒", pool.choose("看鼠标这块"))
 
 
 if __name__ == "__main__":

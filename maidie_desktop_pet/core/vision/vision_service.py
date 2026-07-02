@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from time import monotonic
+from time import monotonic, sleep
 from typing import Callable
 
 from core.vision.image_preprocess import preprocess_for_vl
@@ -17,7 +17,9 @@ class VisionService:
                  client: QwenVLClient | None = None, max_width: int | None = None,
                  jpeg_quality: int | None = None, cache_ttl_seconds: float | None = None,
                  clock: Callable[[], float] = monotonic,
-                 session: VisionSession | None = None) -> None:
+                 session: VisionSession | None = None,
+                 cursor_delay_seconds: float = 3.0,
+                 sleeper: Callable[[float], None] = sleep) -> None:
         self.capture = capture or ScreenCapture()
         self.client = client or QwenVLClient()
         self.max_width = max_width or self._env_int("VISION_MAX_WIDTH", 1280)
@@ -29,6 +31,8 @@ class VisionService:
         self._cached_at = float("-inf")
         self._cached_scope = ""
         self.session = session or VisionSession(clock)
+        self.cursor_delay_seconds = max(0.0, float(cursor_delay_seconds))
+        self._sleeper = sleeper
         self.logger = logging.getLogger(__name__)
 
     def reconfigure(self, settings: dict[str, object]) -> None:
@@ -69,6 +73,10 @@ class VisionService:
         if scope == "fullscreen":
             image = self.capture.capture_fullscreen()
         elif scope == "cursor_region":
+            self.logger.debug("vision scope=cursor_region cursor_delay=%.1f",
+                              self.cursor_delay_seconds)
+            if self.cursor_delay_seconds:
+                self._sleeper(self.cursor_delay_seconds)
             image = self.capture.capture_cursor_region()
         else:
             image = self.capture.capture_active_window()
