@@ -66,6 +66,13 @@ class BrainExecutor:
                     kind=str(safe_params.get("kind", "long_term")),
                     limit=int(safe_params.get("limit", 20)),
                 )
+            if name == "screen":
+                return tool.run(
+                    str(safe_params.get("query") or user_input),
+                    scope=str(safe_params.get("scope") or "active_window"),
+                    reuse_session=bool(safe_params.get("reuse_session", False)),
+                    force_refresh=bool(safe_params.get("force_refresh", False)),
+                )
             return tool.run(str(safe_params.get("query") or user_input))
         except Exception as exc:
             return self._error(name, str(exc))

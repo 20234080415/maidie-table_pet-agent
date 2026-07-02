@@ -16,12 +16,21 @@ class ScreenTool(Tool):
     def match(self, query: str) -> bool:
         return False  # Only BrainRouter may invoke screen capture.
 
-    def run(self, query: str) -> ToolResult:
+    def run(self, query: str, scope: str = "active_window",
+            reuse_session: bool = False, force_refresh: bool = False) -> ToolResult:
         try:
             if self.vision_service is not None:
-                context = self.vision_service.capture_and_analyze(query)
+                session = self.vision_service.session
+                context = session.get_context() if reuse_session else None
+                session_hit = context is not None and session.has_active_session()
+                if not session_hit:
+                    context = self.vision_service.capture_and_analyze(
+                        query, scope=scope, force_refresh=force_refresh
+                    )
                 raw = {"vision_context": context.to_dict(), "task_type": context.task_type,
-                       "confidence": context.confidence}
+                       "confidence": context.confidence, "vision_scope": scope,
+                       "vision_session_hit": session_hit,
+                       "vision_session_age": session.age()}
             else:
                 raw = self.awareness_provider.screen_awareness_snapshot()
             if not isinstance(raw, dict):

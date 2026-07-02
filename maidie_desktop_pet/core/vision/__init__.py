@@ -5,7 +5,8 @@ from core.vision.screen_capture import ScreenCapture
 from core.vision.screen_reader import ScreenReader
 from core.vision.vision_context import VisionContext
 from core.vision.vision_service import VisionService
+from core.vision.vision_session import VisionSession
 
 __all__ = ["QwenVLClient", "ScreenCapture", "ScreenReader", "VisionAPIError",
            "VisionCaptureError", "VisionConfigError", "VisionContext", "VisionError",
-           "VisionParseError", "VisionService"]
+           "VisionParseError", "VisionService", "VisionSession"]

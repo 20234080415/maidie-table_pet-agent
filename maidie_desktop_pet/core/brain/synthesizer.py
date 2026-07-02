@@ -27,7 +27,12 @@ class Synthesizer:
         prompt = self._prompt(user_input, source, plan, tool_data, memory_context)
         if source == "clarification":
             mark(local_response_used=True)
-            normalized = {"text": "你是想让我看当前屏幕吗？", "emotion": "thinking",
+            normalized = {"text": "你是想让我看一下当前屏幕吗？如果是的话，我可以截取当前窗口帮你分析。",
+                          "emotion": "thinking",
+                          "action": "talk", "state": "talking", "source": source}
+        elif source == "vision_cleared":
+            mark(local_response_used=True)
+            normalized = {"text": "好，我不再沿用刚才的屏幕内容了。", "emotion": "idle",
                           "action": "talk", "state": "talking", "source": source}
         elif plan and plan.get("missing_search_query"):
             mark(local_response_used=True)
@@ -144,6 +149,8 @@ class Synthesizer:
             "不要假装看到视觉结构化结果未提供的内容；信息不足时说明不确定并建议下一步。"
             "代码报错要解释最可能原因并给修复建议；题目先讲思路再给答案；"
             "软件界面要给出具体下一步操作。回答具体、可执行，不过度卖萌。"
+            "尽量自然地依次说明：看到了什么、问题原因或当前状态、现在可以怎么做、"
+            "可复制的命令或代码，以及仍未解决时下一步该让我看哪里。不要机械输出固定标题。"
             if source == "screen" else
             "只依据下方工具数据回答，不得补全或猜测事实；数据报错或不足就可爱地说暂时没查到。"
             if source != "chat" else "这是纯桌宠聊天，不得声称读取了任何设备或外部事实。"

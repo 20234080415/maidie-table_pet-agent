@@ -12,7 +12,13 @@ SCREEN = re.compile(
     r"你看看我现在屏幕这个题怎么写|你看看我现在屏幕这个报错|"
     r"你能.*(?:看到|看见).*(?:屏幕|桌面)", re.I,
 )
-AMBIGUOUS_VISION = re.compile(r"^(?:帮我看一下|这个怎么弄|这个题怎么写|这题怎么做)[？?！!。.\s]*$", re.I)
+AMBIGUOUS_VISION = re.compile(
+    r"^(?:这个怎么弄|这是啥情况|帮我看看|帮我看一下|看一下|这个什么意思|这个题怎么写|这题怎么做)"
+    r"[？?！!。.\s]*$", re.I,
+)
+CURSOR_VISION = re.compile(
+    r"^(?:看这里|看鼠标这块|这个按钮|这个位置|这块)[？?！!。.\s]*$", re.I,
+)
 TECHNICAL = re.compile(r"代码|编译|linux|cmake|makefile|python|api|报错", re.I)
 EXPLANATION = re.compile(r"是什么意思|怎么用|有什么作用", re.I)
 GREETING = re.compile(r"^(?:你好|嗨|hello|hi|嗯|好的)[！!。.？?\s]*$", re.I)
@@ -35,6 +41,9 @@ def is_simple_weather_query(text: str) -> bool:
 
 def fast_route(text: str) -> dict[str, Any] | None:
     value = str(text).strip()
+    if CURSOR_VISION.search(value):
+        return _route("vision", "explicit cursor-region request", need_screen=True,
+                      need_vision=True, vision_scope="cursor_region")
     if AMBIGUOUS_VISION.fullmatch(value):
         return _route("clarification", "ambiguous visual reference", need_screen=False,
                       need_vision=False)
@@ -54,7 +63,8 @@ def fast_route(text: str) -> dict[str, Any] | None:
 
 
 def _route(intent: str, reason: str, *, need_screen: bool = False,
-           need_vision: bool = False) -> dict[str, Any]:
+           need_vision: bool = False, vision_scope: str = "active_window") -> dict[str, Any]:
     return {"intent": intent, "confidence": 1.0, "route_source": "fast_rule",
             "source": "fast_rule", "reason": reason, "need_screen": need_screen,
-            "need_vision": need_vision, "permission_required": need_screen}
+            "need_vision": need_vision, "permission_required": need_screen,
+            "vision_scope": vision_scope}

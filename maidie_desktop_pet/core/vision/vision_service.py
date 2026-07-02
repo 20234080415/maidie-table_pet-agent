@@ -9,13 +9,15 @@ from core.vision.image_preprocess import preprocess_for_vl
 from core.vision.qwen_vl_client import QwenVLClient
 from core.vision.screen_capture import ScreenCapture
 from core.vision.vision_context import VisionContext
+from core.vision.vision_session import VisionSession
 
 
 class VisionService:
     def __init__(self, capture: ScreenCapture | None = None,
                  client: QwenVLClient | None = None, max_width: int | None = None,
                  jpeg_quality: int | None = None, cache_ttl_seconds: float | None = None,
-                 clock: Callable[[], float] = monotonic) -> None:
+                 clock: Callable[[], float] = monotonic,
+                 session: VisionSession | None = None) -> None:
         self.capture = capture or ScreenCapture()
         self.client = client or QwenVLClient()
         self.max_width = max_width or self._env_int("VISION_MAX_WIDTH", 1280)
@@ -26,6 +28,7 @@ class VisionService:
         self._cached_context: VisionContext | None = None
         self._cached_at = float("-inf")
         self._cached_scope = ""
+        self.session = session or VisionSession(clock)
         self.logger = logging.getLogger(__name__)
 
     def reconfigure(self, settings: dict[str, object]) -> None:
@@ -52,30 +55,52 @@ class VisionService:
         self._cached_context = None
         self._cached_at = float("-inf")
 
-    def capture_and_analyze(self, user_question: str,
-                            scope: str = "active_window") -> VisionContext:
+    def capture_and_analyze(self, user_question: str, scope: str = "active_window",
+                            force_refresh: bool = False) -> VisionContext:
         now = self._clock()
-        if (self._cached_context is not None and self._cached_scope == scope and
+        if (not force_refresh and self._cached_context is not None and self._cached_scope == scope and
                 now - self._cached_at <= self.cache_ttl_seconds):
             self.logger.debug("vision scope=%s cache_hit=true task_type=%s confidence=%.3f",
                               scope, self._cached_context.task_type,
                               self._cached_context.confidence)
+            self.session.update(self._cached_context, user_question, scope=scope)
             return self._cached_context
 
-        image = (self.capture.capture_fullscreen() if scope == "fullscreen" else
-                 self.capture.capture_active_window())
+        if scope == "fullscreen":
+            image = self.capture.capture_fullscreen()
+        elif scope == "cursor_region":
+            image = self.capture.capture_cursor_region()
+        else:
+            image = self.capture.capture_active_window()
         original_size = image.size
         data_url, image_size, jpeg_size = preprocess_for_vl(
             image, self.max_width, self.jpeg_quality
         )
-        context = self.client.analyze_image(data_url, user_question, image_size)
+        qwen_started = self._clock()
+        try:
+            context = self.client.analyze_image(data_url, user_question, image_size)
+        except Exception:
+            self.logger.debug(
+                "vision scope=%s qwen_latency=%.3f qwen_failed=true",
+                scope, self._clock() - qwen_started,
+            )
+            raise
+        qwen_latency = self._clock() - qwen_started
         self._cached_context, self._cached_at, self._cached_scope = context, now, scope
+        self.session.update(context, user_question, scope=scope)
         self.logger.debug(
             "vision scope=%s original_size=%s compressed_size=%s jpeg_bytes=%d "
-            "task_type=%s confidence=%.3f cache_hit=false",
+            "task_type=%s confidence=%.3f cache_hit=false qwen_latency=%.3f",
             scope, original_size, image_size, jpeg_size, context.task_type, context.confidence,
+            qwen_latency,
         )
         return context
+
+    def clear_session(self) -> None:
+        self.session.clear()
+        self._cached_context = None
+        self._cached_at = float("-inf")
+        self._cached_scope = ""
 
     @staticmethod
     def _env_int(name: str, default: int) -> int:
