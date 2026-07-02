@@ -1,5 +1,15 @@
 # 安装与启动
 
+## 千问视觉依赖
+
+千问视觉通过 `openai` Python SDK 调用阿里云百炼兼容接口。升级已有环境后需要重新安装依赖并重启 Maidie：
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+如果界面提示网络或模型服务失败，而日志中出现 `No module named 'openai'`，说明启动 Maidie 的 Python 环境尚未安装新依赖。应在同一个虚拟环境中执行安装和启动。配置与连通测试见[千问视觉与屏幕理解](VISION.md)。
+
 ## 环境要求
 
 - Windows 10 或 Windows 11

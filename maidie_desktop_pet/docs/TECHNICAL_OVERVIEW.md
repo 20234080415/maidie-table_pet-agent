@@ -1,5 +1,25 @@
 # Maidie 技术架构
 
+## 千问视觉管线
+
+明确视觉请求沿用生产 Agent 管线，不建立第二套回答链路：
+
+```text
+fast_route / LLMIntentRouter
+  → vision intent（兼容层映射为 screen 工具计划）
+  → BrainPlanner → BrainExecutor → ScreenTool
+  → VisionService
+  → ScreenCapture + JPEG preprocess
+  → QwenVLClient(qwen3-vl-flash)
+  → VisionContext 结构化数据
+  → Synthesizer + DeepSeek
+  → UI
+```
+
+`core/vision` 包含错误类型、截图、图片预处理、百炼客户端、`VisionContext` 和短缓存编排。视觉模型不生成最终用户文本；工具只把结构化结果交还给 Synthesizer。截图、图片处理和网络调用运行在现有 AI 后台任务中，不操作 QWidget。
+
+OCR 属于旧的可选本地感知链路，目前不参与视觉模型请求，也不是其失败降级。完整用户说明见[千问视觉与屏幕理解](VISION.md)。
+
 本文说明 Maidie 的生产 Agent 链路、模块职责和架构边界。界面能力见[功能说明](FEATURES.md)，权限边界见[隐私与安全](PRIVACY_AND_SAFETY.md)。
 
 ## 总体架构

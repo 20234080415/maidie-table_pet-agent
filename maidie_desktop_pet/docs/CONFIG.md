@@ -1,5 +1,13 @@
 # 配置说明
 
+## 千问视觉配置
+
+在“性格与模型设置 → 千问视觉”中配置百炼 Workspace ID、API Key、`qwen3-vl-flash`、地域、压缩参数和缓存时间。设置保存后立即应用，环境变量优先于 JSON 中保存的值。
+
+支持 `DASHSCOPE_API_KEY`、`DASHSCOPE_WORKSPACE_ID`、`QWEN_VL_MODEL`、`QWEN_VL_REGION`、`VISION_MAX_WIDTH`、`VISION_JPEG_QUALITY` 和 `VISION_CACHE_TTL_SECONDS`。完整示例见[千问视觉与屏幕理解](VISION.md)。
+
+视觉 Key 在 `config/config.json` 中为本地明文；推荐使用环境变量，且不要提交真实配置。
+
 Maidie 的本地配置位于 `config/config.json`。推荐优先通过设置界面修改；API Key 也可以通过环境变量提供。
 
 ## 设置界面
