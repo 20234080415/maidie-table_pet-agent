@@ -2,5 +2,6 @@ PyQt6>=6.6
 requests>=2.31
 Pillow>=10.0
 pytesseract>=0.3.13
-# Optional for the future voice plugin:
-# edge-tts>=6.1
+
+# Optional for future voice / TTS plugin:
+# edge-tts>=6.1.9

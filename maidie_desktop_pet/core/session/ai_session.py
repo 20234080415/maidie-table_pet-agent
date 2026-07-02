@@ -9,6 +9,7 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from core.chat.chat_streamer import ChatStreamer
 from core.performance import begin, finish
+from core.session.thinking_feedback import ThinkingFeedbackPool
 
 
 class AISessionCoordinator(QObject):
@@ -27,6 +28,8 @@ class AISessionCoordinator(QObject):
         response_completed: Callable[[str, dict[str, str], str | None], None],
         sentence_completed: Callable[[str], None] | None = None,
         parent: QObject | None = None,
+        thinking_feedback: Callable[[str], None] | None = None,
+        feedback_pool: ThinkingFeedbackPool | None = None,
     ) -> None:
         super().__init__(parent)
         self.ai_router = ai_router
@@ -36,6 +39,8 @@ class AISessionCoordinator(QObject):
         self.present_text = present_text
         self.result_received = result_received
         self.response_completed = response_completed
+        self.thinking_feedback = thinking_feedback
+        self.feedback_pool = feedback_pool or ThinkingFeedbackPool()
         self.busy = False
         self.pending_message = ""
         self.pending_source = "chat"
@@ -66,6 +71,8 @@ class AISessionCoordinator(QObject):
         try:
             self.streamer.start()
             context, self.pending_reaction = self.prepare_request(message, proactive)
+            if self.thinking_feedback:
+                self.thinking_feedback(self.feedback_pool.choose(message))
             self.future = self.executor.submit(
                 self._run_request, message, context, self.request_id, submitted_at
             )

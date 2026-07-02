@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QApplication
 
 from core.pet import PetController
 from core.session import AISessionCoordinator
+from core.session import ThinkingFeedbackPool
 
 
 class _Future:
@@ -25,8 +26,10 @@ class _Future:
 
 
 class _Executor:
-    def __init__(self, future): self.future = future
-    def submit(self, *_args): return self.future
+    def __init__(self, future): self.future, self.calls = future, []
+    def submit(self, *args):
+        self.calls.append(args)
+        return self.future
 
 
 class _Memory:
@@ -103,6 +106,29 @@ class AISessionTests(unittest.TestCase):
             }, "happy",
         )
         self.assertFalse(session.busy)
+        session.shutdown()
+
+    def test_thinking_feedback_varies_by_request_context(self):
+        pool = ThinkingFeedbackPool(chooser=lambda phrases: phrases[0])
+        self.assertEqual(pool.choose("看看我的屏幕"), "让我看看。")
+        self.assertEqual(pool.choose("今天天气怎么样"), "嗯，我查一下。")
+        self.assertEqual(pool.choose("CMake 报错"), "我想想。")
+        self.assertGreaterEqual(len(pool.phrases_for("你好")), 4)
+
+    def test_session_emits_feedback_without_second_ai_request(self):
+        feedback = Mock()
+        future = _Future(done=False)
+        session = AISessionCoordinator(
+            Mock(), _Executor(future), Mock(),
+            lambda _message, _proactive: ([], None), Mock(), Mock(), Mock(),
+            thinking_feedback=feedback,
+            feedback_pool=ThinkingFeedbackPool(chooser=lambda phrases: phrases[0]),
+        )
+
+        session.submit("现在几点")
+
+        feedback.assert_called_once_with("嗯，我查一下。")
+        self.assertEqual(len(session.executor.calls), 1)
         session.shutdown()
 
 

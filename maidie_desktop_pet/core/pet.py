@@ -79,6 +79,7 @@ class PetController(QObject):
             self._prepare_ai_request, self._show_stream_fragment,
             self._on_ai_result, self._on_ai_response_completed,
             self.sentence_completed.emit, self,
+            thinking_feedback=self.message_delta.emit,
         )
         self.chat_streamer = self.ai_session.streamer
         self._last_tick = monotonic()
@@ -352,7 +353,6 @@ class PetController(QObject):
             self.action_registry.match_message(message) if self.action_registry else None
         )
         self.stream_started.emit({"source": "chat"})
-        self.message_delta.emit("等我一下下。")
         self.emotion_state.apply_event("ai_thinking")
         self.emotion_changed.emit("thinking")
         self.movement.stop()
