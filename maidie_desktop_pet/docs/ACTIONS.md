@@ -87,4 +87,3 @@ python tools/import_action_strip.py "动作.png" "assets/actions/action-name.web
 - 检查素材文件名、帧数和配置一致。
 - 检查透明边缘、人物比例、基线和循环接缝。
 - 运行完整测试：`python -m unittest discover -v`。
-

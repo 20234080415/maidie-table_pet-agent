@@ -66,4 +66,3 @@ C:\Program Files\Tesseract-OCR\tessdata\chi_sim.traineddata
 - 缺少模块：激活 `.venv` 后重新执行 `python -m pip install -r requirements.txt`。
 - OCR 不可用：检查可执行文件路径和 `eng`、`chi_sim` 语言包。
 - API 请求失败：检查 Base URL、模型名称和 Key，详见[配置说明](CONFIG.md)。
-
