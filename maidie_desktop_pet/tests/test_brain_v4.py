@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from ai.client import AIClient, normalize_response
-from core.brain import BrainPlanner, BrainRouter, IntentClassifier, LLMIntentRouter, Synthesizer
+from core.brain import BrainExecutor, BrainPlanner, BrainRouter, IntentClassifier, LLMIntentRouter, Synthesizer
 from core.tools import MemoryTool, ScreenTool, SearchTool, SystemTool, TimeTool, ToolRegistry
 from core.tools.base import Tool
 
@@ -121,11 +121,12 @@ class BrainV4AcceptanceTests(unittest.TestCase):
         confirmation_requests = []
         system = SystemTool(confirmation_callback=lambda action, params:
                             confirmation_requests.append((action, params)) or False)
-        router = BrainRouter(self.client, self.client, ToolRegistry([system]), self.memory)
+        executor = BrainExecutor(ToolRegistry([system]))
 
-        result = router._execute_tool("system", "copy", {
+        execution = executor.execute({"steps": [{"tool": "system", "params": {
             "operation": "copy_clipboard", "text": "unsafe", "confirmed": True,
-        })
+        }}]}, "copy")[0]
+        result = execution["data"]
 
         self.assertTrue(result["raw"]["denied"])
         self.assertEqual(len(confirmation_requests), 1)
