@@ -86,6 +86,15 @@ Qt UI 测试使用 `QT_QPA_PLATFORM=offscreen`，不需要显示真实窗口。
 4. 检查文档与当前默认配置一致。
 5. 对 UI 改动同时检查高 DPI、焦点、鼠标穿透和关闭生命周期。
 
+## 维护打包配置
+
+- `build_exe.bat` 使用当前激活的 Python/conda 环境，不依赖项目 `.venv`。
+- `maidie.spec` 会递归收集 `assets/` 和 `docs/`，新增普通素材无需逐项登记。
+- 新增运行时数据目录时，应在 `maidie.spec` 的 `datas` 中加入整个目录。
+- 新增通过字符串动态导入的插件包时，应加入 `hiddenimports` 或使用 `collect_submodules`。
+- 新增配置字段时，同时更新 `packaging/config.json`，但绝不能写入真实 Key。
+- 发布前应从干净目录运行 `build_exe.bat`，启动 `dist/Maidie/Maidie.exe` 并检查动画、配置写入、日志和记忆数据库。
+
 ## 未来扩展方向
 
 - Live2D 或 Spine 动画后端。

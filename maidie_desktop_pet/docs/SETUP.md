@@ -60,9 +60,28 @@ C:\Program Files\Tesseract-OCR\tessdata\chi_sim.traineddata
 
 启用 OCR 前，请阅读[隐私与安全边界](PRIVACY_AND_SAFETY.md)，再在设置界面开启屏幕理解。
 
+## 打包 Windows EXE
+
+先激活用于构建的 conda 或其他 Python 环境，然后运行：
+
+```powershell
+.\build_exe.bat
+```
+
+脚本会在当前环境安装 `requirements.txt` 和 `requirements-build.txt`，再通过 `maidie.spec` 构建。输出位于：
+
+```text
+dist\Maidie\Maidie.exe
+```
+
+这是 one-folder 发布包。复制或发布时必须保留整个 `dist\Maidie` 目录，不能只拿走 EXE。该结构便于后续增加动作、素材、文档和插件，也比 one-file 模式更容易排查资源问题。
+
+构建包使用 `packaging/config.json`，其中不应出现真实 Key。首次运行后可在发布目录的 `config/config.json` 中配置，也可以使用环境变量。
+
 ## 启动问题排查
 
 - 无法创建虚拟环境：确认 `python --version` 可用且版本不低于 3.10。
 - 缺少模块：激活 `.venv` 后重新执行 `python -m pip install -r requirements.txt`。
 - OCR 不可用：检查可执行文件路径和 `eng`、`chi_sim` 语言包。
 - API 请求失败：检查 Base URL、模型名称和 Key，详见[配置说明](CONFIG.md)。
+- 打包失败：确认当前环境为 Python 3.10+，并检查 PyInstaller 输出；不要只复制生成的 EXE。
