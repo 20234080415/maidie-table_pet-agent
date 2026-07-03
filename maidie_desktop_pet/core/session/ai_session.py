@@ -49,6 +49,7 @@ class AISessionCoordinator(QObject):
         self.pending_proactive = False
         self.future: Any | None = None
         self.request_id = ""
+        self._shutting_down = False
         self.poll_timer = QTimer(self)
         self.poll_timer.setInterval(15)
         self.poll_timer.timeout.connect(self.poll_future)
@@ -60,6 +61,8 @@ class AISessionCoordinator(QObject):
         self._stream_delta_ready.connect(self.handle_stream_delta)
 
     def submit(self, message: str, proactive: bool = False) -> bool:
+        if self._shutting_down:
+            return False
         message = message.strip()
         if not message or self.busy:
             return False
@@ -99,6 +102,8 @@ class AISessionCoordinator(QObject):
             finish(self.logger, submitted_at)
 
     def poll_future(self) -> None:
+        if self._shutting_down:
+            return
         future = self.future
         if future is None or not future.done():
             return
@@ -111,6 +116,8 @@ class AISessionCoordinator(QObject):
             self.handle_result({"error": str(exc)})
 
     def handle_stream_delta(self, delta: str) -> None:
+        if self._shutting_down:
+            return
         self.streamer.push_token(delta)
 
     def present_stream_text(self, fragment: str) -> None:
@@ -151,4 +158,14 @@ class AISessionCoordinator(QObject):
         self.pending_proactive = False
 
     def shutdown(self) -> None:
+        if self._shutting_down:
+            return
+        self._shutting_down = True
         self.poll_timer.stop()
+        self.streamer.stop()
+        if self.future is not None:
+            cancel = getattr(self.future, "cancel", None)
+            if callable(cancel):
+                cancel()
+            self.future = None
+        self.busy = False

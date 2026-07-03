@@ -15,6 +15,7 @@ from ai.prompt import (
     MAIDIE_SYSTEM_PROMPT,
     DESKTOP_AGENT_CAPABILITY_PROMPT,
 )
+from core.prompts.memory import MEMORY_EXTRACTION_SYSTEM_PROMPT, build_memory_extraction_prompt
 
 
 AIResponse = dict[str, str]
@@ -293,15 +294,7 @@ class OpenAICompatibleClient(AIClient):
         """Extract durable, non-sensitive user memories from one exchange."""
         if not self.api_key or self.api_key == "YOUR_API_KEY_HERE":
             return {"facts": [], "preferences": []}
-        prompt = (
-            "从下面这一轮对话中提取值得长期记住的用户事实和偏好。"
-            "不要提取密码、API Key、令牌、身份证件、银行卡、联系方式、地址、"
-            "健康隐私或其他敏感信息。临时问题和助手自己的内容不要记忆。"
-            "只返回 JSON：{\"facts\":[{\"key\":\"\",\"value\":\"\","
-            "\"importance\":0.7}],\"preferences\":[{\"key\":\"\","
-            "\"value\":\"\",\"importance\":0.9}]}。没有内容时数组为空。\n"
-            f"用户：{message}\n助手：{response}"
-        )
+        prompt = build_memory_extraction_prompt(message, response)
         try:
             api_response = requests.post(
                 f"{self.base_url}/chat/completions",
@@ -312,7 +305,7 @@ class OpenAICompatibleClient(AIClient):
                 json={
                     "model": self.model,
                     "messages": [
-                        {"role": "system", "content": DESKTOP_AGENT_CAPABILITY_PROMPT + "\n你是严格的非敏感记忆提取器。"},
+                        {"role": "system", "content": DESKTOP_AGENT_CAPABILITY_PROMPT + "\n" + MEMORY_EXTRACTION_SYSTEM_PROMPT},
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0,

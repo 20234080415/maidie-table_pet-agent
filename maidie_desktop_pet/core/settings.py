@@ -6,14 +6,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-
-PERSONALITY_PRESETS = {
-    "gentle_tsundere": ("温柔傲娇", "温柔体贴，带一点不坦率的小傲娇，亲近但不过分黏人。"),
-    "cheerful": ("元气活泼", "开朗、有活力、喜欢鼓励主人，语气轻快俏皮。"),
-    "healing": ("安静治愈", "安静、柔软、有耐心，像陪在身边的小小安心感。"),
-    "elegant_maid": ("优雅女仆", "礼貌优雅、认真可靠，偶尔流露可爱的少女心。"),
-    "custom": ("自定义", ""),
-}
+from core.prompts.personality import PERSONALITY_PRESETS, build_personality_prompt
 
 NETWORK_DEFAULTS = {
     "enabled": False,
@@ -163,11 +156,9 @@ class ConfigStore:
     def personality_prompt(self, config: dict[str, Any] | None = None) -> str:
         config = config or self.load()
         settings = config.get("personality", {})
-        preset = settings.get("preset", "gentle_tsundere")
+        preset = str(settings.get("preset", "gentle_tsundere"))
         custom = str(settings.get("custom_prompt", "")).strip()
-        if preset == "custom" and custom:
-            return custom
-        return PERSONALITY_PRESETS.get(preset, PERSONALITY_PRESETS["gentle_tsundere"])[1]
+        return build_personality_prompt(preset, custom)
 
     def _atomic_write(self, config: dict[str, Any]) -> None:
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")

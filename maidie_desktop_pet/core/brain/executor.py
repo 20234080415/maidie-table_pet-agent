@@ -82,6 +82,12 @@ class BrainExecutor:
                                    if isinstance(safe_params.get("selected_rect"), (list, tuple))
                                    and len(safe_params["selected_rect"]) == 4 else None),
                 )
+            if name == "time" and hasattr(tool, "execute"):
+                return tool.execute(
+                    str(safe_params.get("action") or "now"),
+                    target_time_text=str(safe_params.get("target_time_text") or ""),
+                    event=str(safe_params.get("event") or ""),
+                )
             return tool.run(str(safe_params.get("query") or user_input))
         except Exception as exc:
             return self._error(name, str(exc))

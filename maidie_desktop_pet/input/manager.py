@@ -18,11 +18,14 @@ class InputManager(QObject):
         self._last_pos: QPoint | None = None
         self._near = False
         self._hover = False
+        self._stopped = False
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._poll)
         self._timer.start(interval_ms)
 
     def _poll(self) -> None:
+        if self._stopped:
+            return
         position = QCursor.pos()
         if position != self._last_pos:
             self._last_pos = position
@@ -38,3 +41,9 @@ class InputManager(QObject):
         if near != self._near:
             self._near = near
             self.cursor_near.emit(near)
+
+    def shutdown(self) -> None:
+        if self._stopped:
+            return
+        self._stopped = True
+        self._timer.stop()

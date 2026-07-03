@@ -86,4 +86,5 @@ python tools/import_action_strip.py "动作.png" "assets/actions/action-name.web
 
 - 检查素材文件名、帧数和配置一致。
 - 检查透明边缘、人物比例、基线和循环接缝。
+- 为新增 `triggers`、手势、冷却和优先级增加 `ActionRegistry` / 手势测试；不要在 `PetController` 增加平行触发规则。
 - 运行完整测试：`python -m unittest discover -v`。

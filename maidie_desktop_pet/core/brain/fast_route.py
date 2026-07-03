@@ -7,8 +7,12 @@ from core.vision.intent_rules import (VisionScope, detect_vision_scope,
                                       is_cursor_region_request, is_explicit_scope_request)
 
 
-TIME = re.compile(r"现在几点|今天几号|今天星期几|当前时间|现在时间|\b(?:time|date)\b", re.I)
-WEATHER = re.compile(r"天气怎么样|今天天气|今天下雨吗|今天冷不冷|现在多少度|(?:长沙|深圳)天气", re.I)
+TIME = re.compile(r"现在几点|现在的时间|今天几号|今天星期几|当前时间|现在时间|\b(?:time|date)\b", re.I)
+TIME_DELTA = re.compile(r"(?:还有|还剩|距离|到).*(?:多久|多长时间)|(?:多久|多长时间).*(?:下课|开会|考试|出门)", re.I)
+TARGET_TIME = re.compile(
+    r"(?P<time>(?:(?:上午|中午|下午|晚上|凌晨)\s*)?(?:[零一二两三四五六七八九十\d]+点(?:[零一二两三四五六七八九十\d]+分?)?|\d{1,2}[.:]\d{1,2}))"
+)
+WEATHER = re.compile(r"天气|下雨|带伞|气温|温度|多少度|冷不冷|weather|temperature", re.I)
 SCREEN = re.compile(
     r"看屏幕|看一下屏幕|看看我屏幕|看看我的屏幕|你看看我现在|当前窗口|屏幕上|截图|"
     r"看图|图片里|这张图|这个报错|帮我看一下这个报错|帮我看一下屏幕|"
@@ -19,8 +23,8 @@ AMBIGUOUS_VISION = re.compile(
     r"^(?:这个怎么弄|这是啥情况|帮我看看|帮我看一下|看一下|这个什么意思|这个题怎么写|这题怎么做|怎么办)"
     r"[？?！!。.\s]*$", re.I,
 )
-TECHNICAL = re.compile(r"代码|编译|linux|cmake|makefile|python|api|报错", re.I)
-EXPLANATION = re.compile(r"是什么意思|怎么用|有什么作用", re.I)
+TECHNICAL = re.compile(r"代码|编译|linux|cmake|cmakelists\.txt|makefile|python|api|报错|函数|重构", re.I)
+EXPLANATION = re.compile(r"是什么意思|怎么用|有什么作用|解释", re.I)
 GREETING = re.compile(r"^(?:你好|嗨|hello|hi|嗯|好的)[！!。.？?\s]*$", re.I)
 SEARCH = re.compile(r"搜索|搜|继续查|帮我查|查一下|查询|search|look up", re.I)
 COMPLEX_WEATHER = re.compile(r"适合|穿什么|安排|出去玩|建议|推荐|应该", re.I)
@@ -51,24 +55,46 @@ def fast_route(text: str) -> dict[str, Any] | None:
     if AMBIGUOUS_VISION.fullmatch(value):
         return _route("clarification", "ambiguous visual reference", need_screen=False,
                       need_vision=False)
+    if TECHNICAL.search(value) and not re.search(r"屏幕|当前窗口|打开的软件", value) and (
+            EXPLANATION.search(value) or re.search(r"怎么修|为什么不执行|怎么重构|帮我看看", value)):
+        return _route("code_task", "technical task", task_type="code_task")
+    if re.search(r"你能.*(?:看到|看见).*(?:打开的)?软件", value):
+        return _route("vision", "explicit screen request", task_type="screen_understanding",
+                      needs_tools=True, need_screen=True, need_vision=True)
     if SCREEN.search(value):
-        return _route("vision", "explicit screen request", need_screen=True, need_vision=True)
+        return _route("vision", "explicit screen request", task_type="screen_understanding",
+                      needs_tools=True, need_screen=True, need_vision=True)
+    if TIME_DELTA.search(value):
+        target = TARGET_TIME.search(value)
+        if target:
+            tail = value[target.end():]
+            event_match = (None if re.match(r"\s*(?:现在|还有|还剩)", tail) else
+                           re.match(r"\s*(?:要)?([\u4e00-\u9fff]{1,10}?)(?=，|,|。|！|？|\s*(?:现在|还有|还剩|$))", tail))
+            event = event_match.group(1) if event_match else ""
+            return _route("task", "deterministic time delta", task_type="time_delta",
+                          needs_tools=True, entities={"target_time_text": target.group("time").replace(" ", ""),
+                                                      "event": event})
     if is_simple_time_query(value):
-        return _route("task", "deterministic time query")
+        return _route("task", "deterministic time query", task_type="time_now", needs_tools=True)
     if is_weather_query(value):
-        return _route("task", "deterministic weather query")
+        locations = re.findall(r"([\u4e00-\u9fff]{2,8})(?=天气|会下雨)", value)
+        location = locations[-1].replace("今天", "").replace("明天", "") if locations else ""
+        return _route("task", "deterministic weather query", task_type="weather",
+                      needs_tools=True, entities={"location": location})
     if SEARCH.search(value):
-        return _route("task", "deterministic search request")
-    if TECHNICAL.search(value) and EXPLANATION.search(value):
-        return _route("code_task", "simple technical explanation")
+        query = re.sub(r"^(?:帮我)?(?:搜一下|搜索一下|查一下|查询一下?)\s*", "", value).strip()
+        return _route("task", "deterministic search request", task_type="search",
+                      needs_tools=True, entities={"query": query})
     if GREETING.fullmatch(value):
         return _route("chat", "short greeting")
     return None
 
 
-def _route(intent: str, reason: str, *, need_screen: bool = False,
+def _route(intent: str, reason: str, *, task_type: str = "none", needs_tools: bool = False,
+           entities: dict[str, Any] | None = None, need_screen: bool = False,
            need_vision: bool = False, vision_scope: str = "") -> dict[str, Any]:
     return {"intent": intent, "confidence": 1.0, "route_source": "fast_rule",
             "source": "fast_rule", "reason": reason, "need_screen": need_screen,
             "need_vision": need_vision, "permission_required": need_screen,
-            "vision_scope": vision_scope}
+            "vision_scope": vision_scope, "task_type": task_type,
+            "needs_tools": needs_tools, "entities": dict(entities or {})}

@@ -84,7 +84,8 @@ class BrainRouter:
             else:
                 intent = self.intent_router.classify(user_input, context)
         finally:
-            route = self.intent_router.last_route or {}
+            candidate_route = self.intent_router.last_route
+            route = candidate_route if isinstance(candidate_route, dict) else {}
             mark(route_intent=str(route.get("intent", "unknown")),
                  route_source=str(route.get("route_source", route.get("source", "unknown"))),
                  route_duration_ms=round((monotonic() - started) * 1000, 3))
@@ -113,7 +114,11 @@ class BrainRouter:
                               if isinstance(item, dict) and "attention" in item), None)
             started = monotonic()
             try:
-                plan = self.planner.plan_for_intent(user_input, intent, self.memory, attention)
+                if route.get("task_type") not in {None, "", "none"}:
+                    plan = self.planner.plan_route(user_input, route)
+                    plan = self.planner._with_attention(plan, attention)
+                else:
+                    plan = self.planner.plan_for_intent(user_input, intent, self.memory, attention)
                 if intent in {"vision", "screen"}:
                     service = self._vision_service()
                     configured_default = str(getattr(service, "default_scope", "active_window"))

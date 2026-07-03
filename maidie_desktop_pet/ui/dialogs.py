@@ -21,7 +21,6 @@ from PyQt6.QtWidgets import (
 )
 
 from core.settings import PERSONALITY_PRESETS
-from ui.settings import AboutPage, HelpPage
 
 
 BASE_STYLE = """
@@ -115,7 +114,7 @@ class RecentChatsDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, controller, parent=None):
+    def __init__(self, controller, parent=None, initial_tab: str | None = None):
         super().__init__(parent)
         self.controller = controller
         self.settings = controller.settings_snapshot()
@@ -129,8 +128,11 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self._build_network_tab(), "联网查询")
         self.tabs.addTab(self._build_vision_tab(), "千问视觉")
         self.tabs.addTab(self._build_proactive_tab(), "主动行为")
-        self.tabs.addTab(HelpPage(), "帮助与说明")
-        self.tabs.addTab(AboutPage(), "关于 Maidie")
+        if initial_tab:
+            for index in range(self.tabs.count()):
+                if self.tabs.tabText(index) == initial_tab:
+                    self.tabs.setCurrentIndex(index)
+                    break
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
@@ -146,8 +148,8 @@ class SettingsDialog(QDialog):
         page = QWidget()
         layout = QFormLayout(page)
         self.personality = QComboBox()
-        for key, (label, _description) in PERSONALITY_PRESETS.items():
-            self.personality.addItem(label, key)
+        for key, preset in PERSONALITY_PRESETS.items():
+            self.personality.addItem(preset["name"], key)
         current = self.personality.findData(self.settings.get("personality_preset"))
         self.personality.setCurrentIndex(max(0, current))
         self.personality.currentIndexChanged.connect(self._update_personality_help)
@@ -165,7 +167,9 @@ class SettingsDialog(QDialog):
 
     def _update_personality_help(self) -> None:
         key = self.personality.currentData()
-        self.personality_help.setText(PERSONALITY_PRESETS[key][1] or "使用下面填写的自定义性格。")
+        preset = PERSONALITY_PRESETS[key]
+        description = f"{preset['core_identity']} {preset['tone']}"
+        self.personality_help.setText(description or "使用下面填写的自定义性格。")
         self.custom_personality.setEnabled(key == "custom")
 
     def _build_model_tab(self) -> QWidget:

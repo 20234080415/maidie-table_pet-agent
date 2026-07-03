@@ -17,8 +17,10 @@ maidie_desktop_pet/
 ├── core/
 │   ├── brain/                  # 生产 Router、Planner、Executor、Synthesizer
 │   ├── tools/                  # 结构化工具实现与注册表
+│   ├── prompts/                # Router、人格、视觉与合成 Prompt
+│   ├── session/                # AI 会话协调与轻量短期上下文
 │   ├── awareness/              # 窗口、应用、鼠标和剪贴板感知
-│   ├── vision/                 # 可选屏幕 OCR
+│   ├── vision/                 # Qwen VL、截图范围、视觉会话与本地 OCR
 │   ├── experience/             # 情绪、注意力、对话和语音节奏
 │   ├── proactive/              # 主动行为
 │   ├── fence.py                # 围栏约束
@@ -34,15 +36,25 @@ maidie_desktop_pet/
 
 ## 架构约束
 
-- 生产 AI 管线位于 `core/brain/*`；不要把新功能加入旧 `ai/router.py` 或旧 Agent 编排层。
+- 本仓库的完整协作与安全规则见根目录 [AGENTS.md](../AGENTS.md)；本文只保留开发入口和常用检查。
+- 生产 AI 管线位于 `core/brain/*`；不要把新功能加入旧 `ai/router.py` 或 `core/agent/*` 编排层。
+- 新 Agent 功能优先放在 `core/brain`、`core/tools`、`core/prompts` 和对应领域模块。
 - `PetController` 保持协调器职责，不应成为业务逻辑集合。
-- Router 不执行工具；Planner 不生成最终回复；工具只返回结构化数据；Synthesizer 负责最终文本。
+- Router 只识别意图和实体；Planner 消费 RouterResult 并生成计划，不应重新猜意图。
+- Executor 校验并执行计划；工具只返回结构化事实；Synthesizer 是唯一最终文本输出层。
 - Planner 和模型参数不可信；系统写操作必须由执行层确认。
 - 网络、OCR、文件扫描和模型调用不得阻塞 GUI 线程。
 - 后台线程不得直接操作 QWidget、气泡、角色窗口或 QTimer。
 - 每项行为改动都应增加或更新 unittest。
 
 完整链路见[技术架构](TECHNICAL_OVERVIEW.md)，安全约束见[隐私与安全](PRIVACY_AND_SAFETY.md)。
+
+## Prompt 管理
+
+- Router、人格、视觉、记忆和 Synthesizer Prompt 集中放在 `core/prompts/`。
+- 不要在 Router、工具、UI 或 `PetController` 中散落大段系统提示词。
+- Prompt 修改应增加结构化输出、非法 JSON 降级和旧接口兼容测试。
+- `SettingsManager.personality_prompt()` 保持人格配置的兼容入口。
 
 ## 扩展接口
 
@@ -72,6 +84,7 @@ python -m unittest discover -v
 - 流式分句、气泡增量显示、尺寸动画和背景可读性。
 - Qt 主线程响应性和后台任务生命周期。
 - LLM 路由、正则降级、Planner、Executor 和工具数据边界。
+- Router V2 结构化字段、`time_now/time_delta`、时间格式和短期事件上下文。
 - 时间、天气、搜索、屏幕、记忆和网络错误降级。
 - 围栏 clamp、snapback、对话池、overlay 生命周期、移动和缩放。
 - 配置默认值、保存行为和 API Key 隐藏。
@@ -85,6 +98,7 @@ Qt UI 测试使用 `QT_QPA_PLATFORM=offscreen`，不需要显示真实窗口。
 3. 运行完整 unittest。
 4. 检查文档与当前默认配置一致。
 5. 对 UI 改动同时检查高 DPI、焦点、鼠标穿透和关闭生命周期。
+6. 检查 Prompt、配置示例和文档是否与当前结构化字段一致。
 
 ## 维护打包配置
 

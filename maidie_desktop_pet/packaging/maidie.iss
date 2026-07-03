@@ -2,8 +2,8 @@
   #define MyAppVersion "0.1.0"
 #endif
 
-#define MyAppName "Maidie Desktop Pet"
-#define MyAppPublisher "Maidie Desktop Pet"
+#define MyAppName "Maidie"
+#define MyAppPublisher "Maidie"
 #define MyAppExeName "Maidie.exe"
 
 [Setup]
@@ -36,11 +36,11 @@ Source: "..\dist\Maidie\*"; DestDir: "{app}"; Excludes: "config\config.json,logs
 Source: "..\dist\Maidie\config\config.json"; DestDir: "{app}\config"; Flags: onlyifdoesntexist uninsneveruninstall
 
 [Icons]
-Name: "{group}\Maidie Desktop Pet"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\Maidie Desktop Pet"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\Maidie"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\Maidie"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "启动 Maidie Desktop Pet"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "启动 Maidie"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\logs"

@@ -1,28 +1,8 @@
 # Maidie 技术架构
 
-## 千问视觉管线
+本文描述当前生产 Agent 链路。用户功能见[功能说明](FEATURES.md)，线程和扩展约束见[开发指南](DEVELOPMENT.md)。
 
-明确视觉请求沿用生产 Agent 管线，不建立第二套回答链路：
-
-```text
-fast_route / LLMIntentRouter
-  → vision intent（兼容层映射为 screen 工具计划）
-  → BrainPlanner → BrainExecutor → ScreenTool
-  → VisionService
-  → ScreenCapture + JPEG preprocess
-  → QwenVLClient(qwen3-vl-flash)
-  → VisionContext 结构化数据
-  → Synthesizer + DeepSeek
-  → UI
-```
-
-`core/vision` 包含错误类型、截图、图片预处理、百炼客户端、`VisionContext` 和短缓存编排。视觉模型不生成最终用户文本；工具只把结构化结果交还给 Synthesizer。截图、图片处理和网络调用运行在现有 AI 后台任务中，不操作 QWidget。
-
-OCR 属于旧的可选本地感知链路，目前不参与视觉模型请求，也不是其失败降级。完整用户说明见[千问视觉与屏幕理解](VISION.md)。
-
-本文说明 Maidie 的生产 Agent 链路、模块职责和架构边界。界面能力见[功能说明](FEATURES.md)，权限边界见[隐私与安全](PRIVACY_AND_SAFETY.md)。
-
-## 总体架构
+## 总体链路
 
 ```text
 User / Proactive
@@ -31,105 +11,111 @@ User / Proactive
   → BrainPlanner
   → BrainExecutor / ToolRegistry
   → Synthesizer
+  → MaidieStyle
   → PyQt UI / Animation
 ```
 
-`PetController` 是状态、移动和 AI 会话的协调器，但不直接承担路由、规划、工具实现或最终文本合成。
+`PetController` 只协调会话、状态、移动和 UI，不重新实现路由、规划或工具逻辑。
 
-## Maidie Core Brain V4
-
-生产 AI 管线位于 `core/brain/*`：
+## 组件职责
 
 | 组件 | 职责 |
 |---|---|
-| `BrainRouter` | 统一编排意图识别、规划、执行和合成 |
-| `LLMIntentRouter` | 将输入分类为 `chat/task/screen/code_task/system_task` |
-| `BrainPlanner` | 把非闲聊意图转换为结构化工具步骤 |
-| `BrainExecutor` | 校验参数并通过 `ToolRegistry` 执行步骤 |
-| `Synthesizer` | 基于工具事实生成唯一的用户可见最终文本 |
-| `IntentClassifier` | 仅在 LLM 路由失败、超时或非法输出时作安全降级 |
+| `BrainRouter` | 串联路由、规划、执行和合成 |
+| `LLMIntentRouter` | 输出结构化意图；失败时使用 `IntentClassifier` 降级 |
+| `BrainPlanner` | 根据 RouterResult 生成结构化工具步骤 |
+| `BrainExecutor` | 校验工具名和参数，通过 `ToolRegistry` 执行 |
+| `ToolRegistry` | 注册并查找生产工具 |
+| `Synthesizer` | 将工具事实变成唯一的用户可见回复 |
+| `MaidieStyle` | 统一角色语气和响应字段 |
 
-正常聊天不执行工具。天气、时间、屏幕和其他事实任务必须先取得工具数据；Planner 和工具层不得直接生成最终回复。
+## LLMIntentRouter V2
 
-## 意图与路由
-
-- `chat`：日常交流、情绪陪伴和不要求外部事实的表达。
-- `task`：时间、天气、搜索、记忆等事实任务。
-- `screen`：当前屏幕、前台窗口和应用状态。
-- `code_task`：代码、构建、调试、API 和技术文档问题。
-- `system_task`：文件读取、搜索、截图或受控系统操作。
-
-`LLMIntentRouter` 只返回 `intent/confidence/reason` JSON。若模型请求失败、超时、返回空内容或非法 JSON，系统才使用正则分类器兜底。
-
-## Planner、Executor 与工具
-
-Planner 生成结构化计划，例如：
+Router 保留旧字段，并统一输出：
 
 ```json
 {
-  "goal": "读取相关事实",
-  "steps": [
-    {
-      "tool": "memory",
-      "action": "读取相关偏好",
-      "params": {"limit": 20}
-    }
-  ]
+  "intent": "task",
+  "task_type": "time_delta",
+  "entities": {
+    "target_time_text": "5.40",
+    "time_text": null,
+    "event": "下课",
+    "location": null,
+    "query": null
+  },
+  "needs_tools": true,
+  "confidence": 1.0,
+  "reason": "deterministic time delta"
 }
 ```
 
-当前生产工具包括：
+当前 `task_type` 包括：`none`、`time_now`、`time_delta`、`weather`、`search`、`memory`、`screen_understanding`、`calculation`、`file`、`app` 和 `unknown`。内部兼容路径还可能保留代码或系统任务标记。
 
-| 工具 | 事实来源 |
-|---|---|
-| `time` | 本机日期、时间和时区 |
-| `weather` | 天气服务 |
-| `search` | Tavily 搜索摘要与来源 |
-| `screen` | OCR、应用和窗口跟踪 |
-| `memory` | SQLite 近期聊天、事实和偏好 |
-| `system` | 受控的本机读取与系统操作 |
+高置信度的简单请求可由快速规则处理；其他输入交给 LLM。模型返回非法 JSON、空结果或异常时，仍使用旧正则分类器安全降级。
 
-工具只返回结构化 `type/raw/source` 数据。Planner 参数视为不可信输入；系统操作还会在执行层重新检查允许列表和确认要求。
+## 从倒计时问题到回复
 
-## Synthesizer 与防幻觉
+输入：
 
-Synthesizer 是唯一允许生成最终用户文本的层。它必须：
+```text
+我5.40下课，现在还有多久下课
+```
 
-- 只解释工具实际返回的事实；
-- 数据缺失或工具失败时明确说明无法取得结果；
-- 不猜测天气、时间、屏幕内容或搜索结果；
-- 保持 Maidie 的角色语气，同时隐藏内部 Router、Planner 和工具链细节；
-- 输出统一的文本、情绪、动作、状态和来源信息。
+处理过程：
 
-屏幕问题固定汇总 OCR、应用和窗口事实后再交给 Synthesizer。技术知识查询优先通过搜索获取资料，避免调用未注册的工具名称。
+1. Router 输出 `intent=task`、`task_type=time_delta`，并提取 `target_time_text=5.40`、`event=下课`。
+2. Planner 直接消费这些字段，生成 `time / delta_until` 计划，不重新猜测用户意图。
+3. Executor 调用 `TimeTool.delta_until`；TimeTool 读取本机时间、解析目标时间并计算分钟差。
+4. 工具返回 `now`、`target`、`remaining_minutes`、`remaining_text` 和 `event` 等结构化事实。
+5. Synthesizer 依据事实生成 Maidie 的最终回复，不请求屏幕，也不让模型猜当前时间。
 
-## 版本演进
+## Planner、Executor 与工具边界
 
-| 阶段 | 主要能力 | 关键约束 |
-|---|---|---|
-| V1 | Planner、工具链、基础记忆 | 事实任务先规划再执行 |
-| V2 | 鼠标/窗口感知、主动行为、定时任务 | 默认不主动打扰，全局冷却 |
-| V3 | 屏幕 OCR、应用理解、受控系统操作 | OCR 默认关闭，写操作必须确认 |
-| V4 | LLM-first 路由、统一 Brain 管线、Synthesizer | 工具只提供事实，最终文本统一合成 |
+Planner 优先使用 Router 的 `task_type/entities`：
 
-## 生产模块与兼容层
+- `time_now` → `time / now`
+- `time_delta` → `time / delta_until`
+- `weather` → `weather`
+- `search` → `search`
+- `screen_understanding` → 当前屏幕工具链
 
-- `core/brain/*` 是当前生产 AI 架构，新功能应在这里实现。
-- `ai/router.py` 是旧聊天/技术路由兼容模块，不应承载新功能。
-- `core/agent/*` 中旧的 Agent 编排模块主要用于兼容和旧测试。
-- `core/agent/confirmation.py` 中的 `ConfirmationBroker` 仍是生产安全基础设施，不属于废弃模块。
-- `core/tools/*` 保存生产工具实现；工具通过 `ToolRegistry` 注册，不应直接塞入 Router。
+工具遵守 `type/raw/source` 数据契约，只返回事实或结构化错误。Planner 参数属于不可信输入；Executor 会检查允许列表，系统写操作还必须经过执行层确认。
 
-## 并发与 UI 边界
+当前工具包括 `TimeTool`、`WeatherTool`、`SearchTool`、`ScreenTool`、`MemoryTool` 和 `SystemTool`。
 
-网络、OCR、模型请求和文件扫描不得阻塞 GUI 线程。后台结果通过 Qt 主线程安全接收；后台线程不能直接操作 QWidget、气泡、角色窗口或 QTimer。
+## 短期上下文与长期记忆
 
-状态变化统一通过中央状态机和 `PetController` 协调。移动计算位于核心层，窗口、气泡、围栏边框和动画渲染保留在 UI 层。
+`ShortTermTaskContext` 在当前 `LLMIntentRouter` 实例中保存轻量的“事件 → 时间表达”，例如“下课 → 5.40”。它用于解析“还有多久下课”等紧邻追问，仅在当前运行会话有效，不写入 SQLite。
+
+长期事实、偏好和近期对话由本地 SQLite 记忆系统管理，两者职责不同。
+
+## 视觉链路
+
+```text
+LLMIntentRouter / fast route
+  → BrainPlanner → BrainExecutor → ScreenTool
+  → VisionService → capture / JPEG preprocess
+  → QwenVLClient(qwen3-vl-flash)
+  → VisionContext
+  → Synthesizer → MaidieStyle
+```
+
+Qwen VL 只提取屏幕摘要、可见文字、任务类型、重要区域和置信度等结构化视觉事实。最终分析与用户回复仍由 Synthesizer 生成，不建立第二套回答链路。
+
+本地 OCR 与按需 Qwen VL 相互独立，不是自动降级关系。
+
+## 并发与兼容边界
+
+- 模型、网络、OCR、截图处理和文件扫描不得阻塞 Qt GUI 线程。
+- 后台线程不得直接操作 `QWidget`、`QTimer`、气泡或角色窗口。
+- 新 Agent 功能放在 `core/brain`、`core/tools`、`core/prompts` 等生产目录。
+- `ai/router.py` 与 `core/agent/*` 主要用于兼容和旧测试，不承载新生产功能。
 
 ## 当前限制
 
 - 搜索目前只实现 Tavily provider。
-- OCR 质量依赖 Tesseract、语言包、屏幕缩放和画面清晰度。
-- `codex`、`opencode` 不是当前注册的独立生产工具；知识型技术问题使用搜索链路。
-- 系统工具刻意限制任意写入和执行，不是通用桌面自动化框架。
-- 尚未实现语音输入、TTS、Live2D、Spine 或云端多设备记忆同步。
+- 模糊自然语言仍可能依赖所配置 LLM 的结构化输出质量。
+- 短期事件时间在应用重启后清除。
+- OCR 质量取决于 Tesseract、语言包、缩放和画面清晰度。
+- 系统工具不是任意 shell 或通用桌面自动化接口。

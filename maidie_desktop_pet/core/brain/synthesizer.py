@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 from typing import Any, Callable
 
 from ai.client import normalize_response
 from core.brain.fast_route import is_simple_time_query, is_simple_weather_query
 from core.performance import mark
 from core.personality import MaidieStyle
+from core.prompts.synthesizer import build_synthesizer_prompt
 
 
 class Synthesizer:
@@ -70,7 +70,8 @@ class Synthesizer:
             str(item.get("data", {}).get("type", ""))
             for item in tool_data if item.get("ok")
         }
-        return (("time" in successful_types and is_simple_time_query(user_input))
+        return (("time_delta" in successful_types)
+                or ("time" in successful_types and is_simple_time_query(user_input))
                 or ("weather" in successful_types and is_simple_weather_query(user_input)))
 
     @staticmethod
@@ -119,10 +120,17 @@ class Synthesizer:
                 text = "这次没拿到可靠结果，稍后再试试嘛。"
         else:
             data = successful[0]
-            raw = data.get("raw", {}) if isinstance(data, dict) else {}
+            raw = (data.get("raw") or data) if isinstance(data, dict) else {}
             kind = data.get("type") if isinstance(data, dict) else ""
             if kind == "time" and raw.get("iso"):
                 text = f"现在是 {str(raw['iso'])[11:16]} 哦。"
+            elif kind == "time_delta" and raw.get("status") == "elapsed":
+                event = str(raw.get("event") or "目标时间")
+                text = f"现在是 {raw.get('now')}，{event}时间 {raw.get('target')} 已经过了。"
+            elif kind == "time_delta":
+                event = str(raw.get("event") or "目标时间")
+                text = (f"现在是 {raw.get('now')}，{event}时间是 {raw.get('target')}，"
+                        f"还剩 {raw.get('remaining_text')}。")
             elif kind == "weather":
                 text = f"{raw.get('city', '')}气温 {raw.get('temperature', '未知')}，天气 {raw.get('forecast', '未知')}。"
             elif kind == "screen":
@@ -143,23 +151,7 @@ class Synthesizer:
 
     def _prompt(self, user_input: str, source: str, plan: dict[str, Any] | None,
                 tool_data: list[dict[str, Any]], memory_context: str) -> str:
-        facts = json.dumps(tool_data, ensure_ascii=False, default=str)
-        task = (
-            "你是 Maidie 的推理与回答模块。视觉模型只负责观察，最终答案由你生成。"
-            "不要假装看到视觉结构化结果未提供的内容；信息不足时说明不确定并建议下一步。"
-            "代码报错要解释最可能原因并给修复建议；题目先讲思路再给答案；"
-            "软件界面要给出具体下一步操作。回答具体、可执行，不过度卖萌。"
-            "尽量自然地依次说明：看到了什么、问题原因或当前状态、现在可以怎么做、"
-            "可复制的命令或代码，以及仍未解决时下一步该让我看哪里。不要机械输出固定标题。"
-            if source == "screen" else
-            "只依据下方工具数据回答，不得补全或猜测事实；数据报错或不足就可爱地说暂时没查到。"
-            if source != "chat" else "这是纯桌宠聊天，不得声称读取了任何设备或外部事实。"
-        )
-        return (
-            f"{self.style.prompt(self.personality_prompt)}\n{task}\n"
-            "你是唯一输出层。隐藏所有内部步骤，只返回 JSON，字段严格为 text、emotion、action、state。"
-            "emotion 仅限 idle|happy|thinking|shy；action 仅限 talk|react|think；"
-            "state 仅限 talking|idle|thinking。\n"
-            f"用户：{user_input}\n计划：{json.dumps(plan or {}, ensure_ascii=False)}\n"
-            f"工具数据：{facts}\n记忆：{memory_context or '无'}"
+        return build_synthesizer_prompt(
+            self.style.prompt(self.personality_prompt), user_input, source,
+            plan, tool_data, memory_context,
         )

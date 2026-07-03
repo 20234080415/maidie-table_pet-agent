@@ -5,7 +5,25 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from core.prompts.personality import PERSONALITY_PRESETS, build_personality_prompt
 from core.settings import ConfigStore
+
+
+class PersonalityPromptTests(unittest.TestCase):
+    def test_every_preset_builds_a_non_empty_prompt(self):
+        for preset_id in PERSONALITY_PRESETS:
+            with self.subTest(preset_id=preset_id):
+                self.assertTrue(build_personality_prompt(preset_id).strip())
+
+    def test_custom_prompt_takes_priority(self):
+        custom = "你是一位说话简洁、喜欢用比喻的桌面伙伴。"
+        self.assertEqual(build_personality_prompt("custom", custom), custom)
+
+    def test_unknown_preset_falls_back_to_gentle_tsundere(self):
+        self.assertEqual(
+            build_personality_prompt("missing-preset"),
+            build_personality_prompt("gentle_tsundere"),
+        )
 
 
 class ConfigStoreTests(unittest.TestCase):
@@ -40,6 +58,10 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertEqual(saved["ai"]["model"], "new-chat")
         self.assertIn("安静", self.store.personality_prompt(saved))
         self.assertEqual(saved["window"]["width"], 160)
+
+    def test_personality_prompt_supports_legacy_config_fields(self):
+        legacy = {"personality": {"preset": "custom", "custom_prompt": "保持冷静简洁。"}}
+        self.assertEqual(self.store.personality_prompt(legacy), "保持冷静简洁。")
 
     def test_missing_network_settings_use_safe_defaults(self):
         saved = self.store.load()

@@ -209,3 +209,9 @@ class SpeechBubble(QWidget):
 
     def toPlainText(self) -> str:
         return self._text_view.toPlainText()
+
+    def shutdown(self) -> None:
+        self._hide_timer.stop()
+        self._scroll_animation.stop()
+        self._size_animation.stop()
+        self.hide()

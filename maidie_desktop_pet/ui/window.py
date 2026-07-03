@@ -12,6 +12,8 @@ from input.gesture import PetGestureRecognizer
 from ui.bubble import SpeechBubble
 from ui.chat_input import ChatInput
 from ui.dialogs import RecentChatsDialog, SettingsDialog
+from ui.help_dialog import HelpDialog
+from ui.about_dialog import AboutDialog
 from ui.fence_overlay import FenceOverlayWindow
 from ui.resize_handle import SubtleResizeHandle
 from ui.sprite import HatchPetSprite
@@ -26,6 +28,8 @@ class PetWindow(QWidget):
         super().__init__()
         options = options or {}
         self.controller = controller
+        self._shutting_down = False
+        self._input_manager = None
         self.assets_dir = assets_dir
         self._drag_offset: QPoint | None = None
         self._press_local: QPoint | None = None
@@ -41,6 +45,8 @@ class PetWindow(QWidget):
         self._gesture_consumed = False
         self._positioning_overlays = False
         self._dialog = None
+        self._help_dialog: HelpDialog | None = None
+        self._about_dialog: AboutDialog | None = None
         self._region_selector: RegionSelector | None = None
         self._selection_message = ""
         self._opacity_before_selection = self.windowOpacity()
@@ -97,6 +103,8 @@ class PetWindow(QWidget):
         self.resize_handle.raise_()
 
     def _start_region_selection(self, message: str) -> None:
+        if self._shutting_down:
+            return
         if self._region_selector is not None:
             return
         self._selection_message = message
@@ -109,6 +117,8 @@ class PetWindow(QWidget):
         selector.begin()
 
     def _finish_region_selection(self, rect: QRect) -> None:
+        if self._shutting_down:
+            return
         message = self._selection_message
         coordinates = (rect.x(), rect.y(), rect.width(), rect.height())
         self._restore_after_region_selection()
@@ -119,6 +129,8 @@ class PetWindow(QWidget):
         )
 
     def _cancel_region_selection(self) -> None:
+        if self._shutting_down:
+            return
         self._restore_after_region_selection()
         self._selection_message = ""
         self.controller.cancel_region_selection()
@@ -206,23 +218,34 @@ class PetWindow(QWidget):
             self._was_dragged = False
             self.controller.on_pet_drag_started()
         elif event.button() == Qt.MouseButton.RightButton:
-            menu = QMenu(self)
-            menu.addAction("和 Maidie 对话", self.open_chat)
-            menu.addAction("最近聊天", self.show_recent_chats)
-            menu.addAction("性格与模型设置", self.show_settings)
-            menu.addSeparator()
-            menu.addAction("放大 10%", lambda: self.scale_window(1.1))
-            menu.addAction("缩小 10%", lambda: self.scale_window(0.9))
-            menu.addAction("恢复默认大小", lambda: self.resize(320, 380))
-            menu.addAction("清除记忆", self.controller.clear_memory)
-            menu.addSeparator()
-            if self.controller.fence.is_enabled():
-                menu.addAction("解除围栏模式", lambda: self.controller.disable_fence())
-            else:
-                menu.addAction("开启围栏模式", lambda: self.controller.enable_fence())
-            menu.addSeparator()
-            menu.addAction("退出 Maidie", self.close)
+            menu = self._build_context_menu()
             menu.exec(global_pos)
+
+    def _build_context_menu(self) -> QMenu:
+        menu = QMenu(self)
+        menu.addAction("和 Maidie 聊天", self.open_chat)
+        menu.addAction("模型设置", self.show_model_settings)
+        menu.addAction("设置", self.show_settings)
+        menu.addSeparator()
+        menu.addAction("帮助与说明", self.show_help)
+        menu.addAction("关于 Maidie", self.show_about)
+        update_action = menu.addAction("检查更新")
+        update_action.setEnabled(False)
+        menu.addSeparator()
+        menu.addAction("最近聊天", self.show_recent_chats)
+        menu.addSeparator()
+        menu.addAction("放大 10%", lambda: self.scale_window(1.1))
+        menu.addAction("缩小 10%", lambda: self.scale_window(0.9))
+        menu.addAction("恢复默认大小", lambda: self.resize(320, 380))
+        menu.addAction("清除记忆", self.controller.clear_memory)
+        menu.addSeparator()
+        if self.controller.fence.is_enabled():
+            menu.addAction("解除围栏模式", self.controller.disable_fence)
+        else:
+            menu.addAction("开启围栏模式", self.controller.enable_fence)
+        menu.addSeparator()
+        menu.addAction("退出", self.request_exit)
+        return menu
 
     def show_recent_chats(self) -> None:
         self._dialog = RecentChatsDialog(self.controller, self)
@@ -233,6 +256,26 @@ class PetWindow(QWidget):
         if self._dialog.exec():
             self.bubble.show_message("设置已经保存好啦。")
             self._position_overlays()
+
+    def show_model_settings(self) -> None:
+        self._dialog = SettingsDialog(self.controller, self, initial_tab="模型与 API")
+        if self._dialog.exec():
+            self.bubble.show_message("模型设置已经保存好啦。")
+            self._position_overlays()
+
+    def show_help(self) -> None:
+        if self._help_dialog is None or not self._help_dialog.isVisible():
+            self._help_dialog = HelpDialog(self)
+        self._help_dialog.show()
+        self._help_dialog.raise_()
+        self._help_dialog.activateWindow()
+
+    def show_about(self) -> None:
+        if self._about_dialog is None or not self._about_dialog.isVisible():
+            self._about_dialog = AboutDialog(self)
+        self._about_dialog.show()
+        self._about_dialog.raise_()
+        self._about_dialog.activateWindow()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         global_pos = event.globalPosition().toPoint()
@@ -308,6 +351,8 @@ class PetWindow(QWidget):
             event.accept()
 
     def _perform_single_click(self) -> None:
+        if self._shutting_down:
+            return
         region = self._pending_click_region
         self._pending_click_region = None
         if region == "head":
@@ -335,6 +380,8 @@ class PetWindow(QWidget):
         super().leaveEvent(event)
 
     def _update_resize_handle_visibility(self) -> None:
+        if self._shutting_down:
+            return
         inside_window = self.frameGeometry().contains(QCursor.pos())
         should_show = inside_window or self.resize_handle.is_resizing
         if should_show and not self.resize_handle.isVisible():
@@ -386,6 +433,8 @@ class PetWindow(QWidget):
     def _position_overlays(self) -> None:
         """Position floating UI without changing the character's layout size."""
         if (
+            self._shutting_down
+            or
             self._positioning_overlays
             or not hasattr(self, "bubble")
             or not hasattr(self, "chat_input")
@@ -449,10 +498,45 @@ class PetWindow(QWidget):
                 break
         self.chat_input.setGeometry(chosen)
 
-    def closeEvent(self, event) -> None:
-        self.bubble.close()
-        self.chat_input.close()
+    def set_input_manager(self, input_manager) -> None:
+        self._input_manager = input_manager
+
+    def request_exit(self) -> None:
+        self.close()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
+    def shutdown(self) -> None:
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        logger = self.controller.logger
+        logger.info("Shutting down Maidie...")
+        self._single_click_timer.stop()
+        self._handle_visibility_timer.stop()
+        logger.info("Stopped resize handle timer")
+        self.character.shutdown()
+        logger.info("Stopped animation timer")
+        self.bubble.shutdown()
+        self.chat_input.shutdown()
+        if self._input_manager is not None:
+            self._input_manager.shutdown()
+            logger.info("Stopped clipboard watcher and input polling")
+        if self._region_selector is not None:
+            self._region_selector.close()
+            self._region_selector.deleteLater()
+            self._region_selector = None
+        for dialog in (self._dialog, self._help_dialog, self._about_dialog):
+            if dialog is not None:
+                dialog.close()
         if self.fence_overlay is not None:
             self.fence_overlay.close()
         self.controller.shutdown()
+        self.hide()
+        logger.info("Maidie shutdown complete")
+
+    def closeEvent(self, event) -> None:
+        self.shutdown()
+        event.accept()
         super().closeEvent(event)

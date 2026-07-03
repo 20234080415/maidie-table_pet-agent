@@ -56,6 +56,7 @@ class PetController(QObject):
         self.ai_router = ai_router
         self.memory = memory
         self.logger = logger or logging.getLogger(__name__)
+        self._shutting_down = False
         self.config_store = config_store
         self.action_registry = action_registry
         self.proactive_runtime = proactive_runtime
@@ -487,6 +488,8 @@ class PetController(QObject):
             )
 
     def submit_text(self, message: str, proactive: bool = False) -> None:
+        if getattr(self, "_shutting_down", False):
+            return
         if not proactive and detect_vision_scope(message) is VisionScope.SELECTED_REGION:
             if not self.ai_session.busy:
                 self.local_message_requested.emit("好，你框一下要我看的地方就行。")
@@ -496,10 +499,14 @@ class PetController(QObject):
 
     def complete_region_selection(self, message: str,
                                   rect: tuple[int, int, int, int]) -> None:
+        if getattr(self, "_shutting_down", False):
+            return
         self._selected_region_rect = rect
         self.ai_session.submit(message, False)
 
     def cancel_region_selection(self) -> None:
+        if getattr(self, "_shutting_down", False):
+            return
         self._selected_region_rect = None
         self.local_message_requested.emit("好，那这次我就不看屏幕啦。")
 
@@ -657,6 +664,8 @@ class PetController(QObject):
                 pass
 
     def _activate_talking(self, animation: str, duration: int) -> None:
+        if self._shutting_down:
+            return
         if self.action_registry and self.action_registry.get(animation):
             if not self.action_registry.can_trigger(animation):
                 animation = "talking"
@@ -675,12 +684,16 @@ class PetController(QObject):
         QTimer.singleShot(duration, lambda: self._recover_if_current(token))
 
     def _restore_after_interaction(self) -> None:
+        if self._shutting_down:
+            return
         if self._busy:
             self.set_state(PetState.THINKING, BehaviorPriority.AI_TALKING, 300)
         else:
             self._recover_if_current(self._state_token)
 
     def _recover_if_current(self, token: int) -> None:
+        if self._shutting_down:
+            return
         if token != self._state_token:
             return
         motion_state = self.movement.classify_state()
@@ -726,6 +739,8 @@ class PetController(QObject):
                     QTimer.singleShot(900, lambda: self._recover_if_current(token))
 
     def _tick(self) -> None:
+        if self._shutting_down:
+            return
         now = monotonic()
         dt = now - self._last_tick
         self._last_tick = now
@@ -778,6 +793,8 @@ class PetController(QObject):
             self.set_state(motion_state, priority)
 
     def _proactive_tick(self) -> None:
+        if self._shutting_down:
+            return
         if (not self.proactive_runtime or not self.proactive_runtime.engine.enabled
                 or self._busy):
             return
@@ -787,6 +804,8 @@ class PetController(QObject):
         self._proactive_poll_timer.start()
 
     def _poll_proactive_future(self) -> None:
+        if self._shutting_down:
+            return
         future = self._proactive_future
         if future is None or not future.done():
             return
@@ -801,7 +820,7 @@ class PetController(QObject):
 
     def _complete_proactive_result(self, result: tuple[dict[str, Any], Any]) -> None:
         """Apply a worker result from the Qt-thread polling entry point."""
-        if self._busy or not self.proactive_runtime:
+        if self._shutting_down or self._busy or not self.proactive_runtime:
             return
         context, decision = result
         self.attention_manager.update(context)
@@ -826,6 +845,8 @@ class PetController(QObject):
             self._play_action("sleepy")
 
     def _refresh_attention(self) -> None:
+        if self._shutting_down:
+            return
         """Refresh cheap foreground facts; OCR remains on the existing awareness cadence."""
         if not self.proactive_runtime:
             return
@@ -844,10 +865,23 @@ class PetController(QObject):
             self.logger.exception("Attention refresh failed")
 
     def shutdown(self) -> None:
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        self.logger.info("Shutting down Maidie controller...")
         self._tick_timer.stop()
+        self.logger.info("Stopped pet tick timer")
         self._proactive_timer.stop()
-        self.ai_session.shutdown()
         self._proactive_poll_timer.stop()
+        self.logger.info("Stopped proactive timers")
+        self.ai_session.shutdown()
+        self.logger.info("Stopped agent polling timer")
+        if self._proactive_future is not None:
+            cancel = getattr(self._proactive_future, "cancel", None)
+            if callable(cancel):
+                cancel()
+            self._proactive_future = None
         self._user_executor.shutdown(wait=False, cancel_futures=True)
         self._proactive_executor.shutdown(wait=False, cancel_futures=True)
         self._memory_executor.shutdown(wait=False, cancel_futures=True)
+        self.logger.info("Maidie controller shutdown complete")

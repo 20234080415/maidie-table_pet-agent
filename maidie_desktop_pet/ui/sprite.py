@@ -32,6 +32,7 @@ class HatchPetSprite(QLabel):
         self._transition_timer = QTimer(self)
         self._transition_timer.setInterval(16)
         self._transition_timer.timeout.connect(self._advance_transition)
+        self._shutting_down = False
         self._render()
 
     def set_animation(self, state: str) -> None:
@@ -130,6 +131,8 @@ class HatchPetSprite(QLabel):
         )
 
     def _advance_transition(self) -> None:
+        if self._shutting_down:
+            return
         elapsed = monotonic() - self._transition_started
         self._transition_progress = min(1.0, elapsed / self._transition_duration)
         if self._transition_progress >= 1.0:
@@ -205,3 +208,10 @@ class HatchPetSprite(QLabel):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._render()
+
+    def shutdown(self) -> None:
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        self._transition_timer.stop()
+        self.engine.stop()

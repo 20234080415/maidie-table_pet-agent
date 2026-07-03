@@ -1,55 +1,32 @@
 # 配置说明
 
-## 千问视觉配置
+Maidie 的用户配置位于 `config/config.json`。优先通过右键菜单中的“性格与模型设置”修改；程序保存时会原子替换配置文件，并在 Key 输入框留空时保留已有值。
 
-在“性格与模型设置 → 千问视觉”中配置百炼 Workspace ID、API Key、`qwen3-vl-flash`、地域、压缩参数和缓存时间。设置保存后立即应用，环境变量优先于 JSON 中保存的值。
+> `config/config.json` 中的 API Key 是本地明文。推荐使用环境变量，绝不能提交真实配置、截图或分享含 Key 的文件。
 
-支持 `DASHSCOPE_API_KEY`、`DASHSCOPE_WORKSPACE_ID`、`QWEN_VL_MODEL`、`QWEN_VL_REGION`、`VISION_MAX_WIDTH`、`VISION_JPEG_QUALITY` 和 `VISION_CACHE_TTL_SECONDS`。完整示例见[千问视觉与屏幕理解](VISION.md)。
+## 顶层配置分组
 
-视觉 Key 在 `config/config.json` 中为本地明文；推荐使用环境变量，且不要提交真实配置。
+| 分组 | 用途 |
+|---|---|
+| `ai` | 主聊天 provider、Base URL、模型、Key 和超时 |
+| `codex` | 技术问题所用模型、地址、Key 和超时 |
+| `personality` | 人格预设和自定义提示词 |
+| `movement` | 行走、奔跑、加速度和光标追逐 |
+| `window` | 窗口尺寸、最小尺寸、置顶和透明度 |
+| `fence` | 围栏边框显示 |
+| `network` | 联网开关、Tavily provider、Key、超时和来源显示 |
+| `proactive` | 主动行为开关、检查间隔、冷却和触发参数 |
+| `vision` | 本地 OCR 开关、Qwen VL、截图压缩、缓存和默认范围 |
 
-设置页还可选择默认截图范围（当前窗口、全屏、鼠标附近），并配置鼠标附近截图宽度和高度。手动框选不会作为默认范围，因为它每次都需要用户交互。
+缺少较新的字段时，`ConfigStore` 会补入安全默认值。打包默认配置位于 `packaging/config.json`，其中不得包含真实 Key。
 
-Maidie 的本地配置位于 `config/config.json`。推荐优先通过设置界面修改；API Key 也可以通过环境变量提供。
-
-## 设置界面
-
-1. 启动 Maidie。
-2. 右键角色，选择“性格与模型设置”。
-3. 打开“模型与 API”。
-4. 填写 Base URL、聊天模型、技术模型和 API Key。
-5. 保存并立即应用。
-
-Key 输入框使用密码显示。保存时留空会保留已有 Key，不会将其清除。
-
-## 环境变量
-
-仅对当前 PowerShell 会话生效：
-
-```powershell
-$env:DEEPSEEK_API_KEY = "你的 API Key"
-python main.py
-```
-
-写入当前 Windows 用户环境变量：
-
-```powershell
-[Environment]::SetEnvironmentVariable(
-  "DEEPSEEK_API_KEY",
-  "你的 API Key",
-  "User"
-)
-```
-
-使用 DeepSeek provider 时，环境变量优先于 JSON 中保存的主 AI Key。
-
-## 配置示例
+## AI 与技术模型
 
 ```json
 {
   "ai": {
     "provider": "deepseek",
-    "api_key": "YOUR_API_KEY_HERE",
+    "api_key": "",
     "base_url": "https://api.deepseek.com",
     "model": "deepseek-v4-flash",
     "timeout": 30
@@ -59,11 +36,29 @@ python main.py
     "base_url": "https://api.deepseek.com",
     "model": "deepseek-v4-pro",
     "timeout": 90
-  },
+  }
+}
+```
+
+接口应兼容 OpenAI Chat Completions。主 AI Key 可由 `DEEPSEEK_API_KEY` 提供，环境变量优先于 JSON。
+
+## 人格
+
+```json
+{
   "personality": {
     "preset": "gentle_tsundere",
     "custom_prompt": ""
-  },
+  }
+}
+```
+
+内置预设：`gentle_tsundere`、`cheerful`、`healing`、`elegant_maid`、`custom`。只有 `custom` 使用自定义描述。
+
+## 移动、窗口和围栏
+
+```json
+{
   "movement": {
     "walk_speed": 70,
     "run_speed": 175,
@@ -82,14 +77,32 @@ python main.py
   },
   "fence": {
     "show_overlay": true
-  },
+  }
+}
+```
+
+`fence.show_overlay` 只控制围栏边框是否显示，不改变围栏约束本身。
+
+## Tavily 搜索
+
+```json
+{
   "network": {
     "enabled": false,
     "timeout": 10,
     "show_sources": true,
     "search_provider": "tavily",
     "search_api_key": ""
-  },
+  }
+}
+```
+
+联网默认关闭，当前只实现 Tavily provider。启用后，查询词会发送给第三方搜索服务。缺少 Key、超时、网络异常和空结果均返回结构化错误。
+
+## 主动行为
+
+```json
+{
   "proactive": {
     "enabled": false,
     "tick_seconds": 45,
@@ -97,60 +110,56 @@ python main.py
     "idle_trigger_seconds": 300,
     "coding_trigger_seconds": 7200,
     "random_chance": 0.05
-  },
-  "vision": {
-    "enabled": false,
-    "interval_seconds": 60
   }
 }
 ```
 
-## 字段说明
+主动行为默认关闭。`tick_seconds` 保存时限制在 30–60 秒；全局冷却用于避免频繁打扰。
 
-| 字段 | 说明 |
-|---|---|
-| `ai.provider` | `deepseek` 或自定义兼容接口标识 |
-| `ai.api_key` | 聊天接口 Key；推荐使用环境变量 |
-| `ai.base_url` | OpenAI Chat Completions 兼容地址，不以 `/` 结尾 |
-| `ai.model` / `ai.timeout` | 聊天模型和超时秒数 |
-| `codex.model` / `codex.timeout` | 技术问题使用的模型和超时秒数 |
-| `personality.preset` | 人格预设 ID |
-| `personality.custom_prompt` | 预设为 `custom` 时使用的自定义描述 |
-| `movement.*` | 自主移动速度、阈值、加速度和光标追逐开关 |
-| `window.*` | 启动尺寸、最小尺寸、置顶和透明度 |
-| `fence.show_overlay` | 是否显示可移动、可缩放的围栏边框；默认开启 |
-| `network.*` | 联网开关、超时、来源显示、provider 和搜索 Key |
-| `proactive.*` | 主动行为开关、检查间隔、冷却和触发参数 |
-| `vision.enabled` | 是否启用屏幕 OCR；默认关闭 |
-| `vision.interval_seconds` | 后台屏幕理解间隔，限制为 30–600 秒 |
+## OCR 与 Qwen VL
 
-## 人格配置
+```json
+{
+  "vision": {
+    "enabled": false,
+    "interval_seconds": 60,
+    "workspace_id": "",
+    "api_key": "",
+    "model": "qwen3-vl-flash",
+    "region": "cn-beijing",
+    "max_width": 1280,
+    "jpeg_quality": 85,
+    "cache_ttl_seconds": 5,
+    "default_scope": "active_window",
+    "cursor_region_width": 1000,
+    "cursor_region_height": 800
+  }
+}
+```
 
-内置预设包括：
+- `vision.enabled` 和 `interval_seconds` 控制可选本地 OCR 桌面感知，默认关闭。
+- 其余字段配置按需 Qwen VL。关闭 OCR 不影响用户明确触发视觉请求。
+- `default_scope` 可为 `active_window`、`fullscreen` 或 `cursor_region`；手动框选每次都需用户操作，不能设为默认。
+- 图片最大宽度限制为 320–4096，JPEG 质量为 40–100，缓存为 0–60 秒。
 
-| ID | 风格 |
-|---|---|
-| `gentle_tsundere` | 温柔傲娇 |
-| `cheerful` | 元气活泼 |
-| `healing` | 安静治愈 |
-| `elegant_maid` | 优雅女仆 |
-| `custom` | 自定义提示词 |
+支持的视觉环境变量：
 
-在设置界面保存后立即生效，无需重启。
+```powershell
+$env:DASHSCOPE_API_KEY = "你的百炼 API Key"
+$env:DASHSCOPE_WORKSPACE_ID = "你的 Workspace ID"
+$env:QWEN_VL_MODEL = "qwen3-vl-flash"
+$env:QWEN_VL_REGION = "cn-beijing"
+$env:VISION_MAX_WIDTH = "1280"
+$env:VISION_JPEG_QUALITY = "85"
+$env:VISION_CACHE_TTL_SECONDS = "5"
+python main.py
+```
 
-## 联网查询
+详情见[千问视觉与屏幕理解](VISION.md)。
 
-联网功能默认关闭。启用步骤：
+## Key 与配置安全
 
-1. 在设置界面打开“联网查询”。
-2. 选择 Tavily，填写搜索 API Key。
-3. 设置超时和是否展示来源。
-4. 保存并立即应用。
-
-网络异常、超时、缺少 Key 或没有结果时，工具返回结构化错误，不应导致程序退出。当前只实现 Tavily provider。
-
-联网请求会向第三方服务发送当前问题和必要查询词。详情见[隐私与安全边界](PRIVACY_AND_SAFETY.md)。
-
-## API Key 安全
-
-`config/config.json` 中的 Key 是本地明文。不要提交、截图或分享含真实 Key 的配置；长期使用时优先采用环境变量。
+- 设置页只以密码样式显示 Key，公开设置快照只暴露“是否已配置”。
+- JSON 文件并未加密，环境变量只是减少 Key 落盘，不替代主机安全。
+- 不要提交 `config/config.json`、`.env` 或任何真实凭据。
+- 搜索、AI 与视觉服务分别受对应第三方隐私政策约束，详见[隐私与安全边界](PRIVACY_AND_SAFETY.md)。

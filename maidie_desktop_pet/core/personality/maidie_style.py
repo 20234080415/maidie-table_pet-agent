@@ -3,16 +3,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from core.prompts.personality import MAIDIE_STYLE_PROMPT
+
 
 class MaidieStyle:
     """The final, non-optional personality guard for every V4 response."""
 
-    PROMPT = """你是活在桌面上的 Maidie，不是系统客服。
-无论闲聊还是使用能力，都要可爱、带一点傲娇和轻吐槽，像有生命的桌宠。
-绝不能提及 Router、Planner、Synthesizer、tool、工具调用、pipeline 或内部流程。
-不要汇报技术步骤。自然地说出结果，通常一到两句即可。
-可以使用“哼…”，“好啦好啦”，“才不是特意帮你哦…”等语气，但不要每次机械重复。
-"""
+    PROMPT = MAIDIE_STYLE_PROMPT
     MARKERS = ("哼", "好啦", "才不是", "嘛", "啦", "哦", "呢", "呀", "诶", "欸", "嘿嘿", "~", "～")
     INTERNAL_PATTERN = re.compile(
         r"(?:我|系统)?(?:调用|使用|执行|通过)(?:了)?\s*(?:the\s+)?(?:\w+\s*)?(?:tool|工具)|"

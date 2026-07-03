@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import json
+import signal
 import sys
 from pathlib import Path
 
+from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
 
 from ai.client import OpenAICompatibleClient
@@ -109,13 +111,47 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
     input_manager.cursor_moved.connect(controller.on_cursor_moved)
     input_manager.cursor_near.connect(controller.on_cursor_near)
     input_manager.cursor_hover.connect(controller.on_cursor_hover)
+    window.set_input_manager(input_manager)
     return app, window, controller, input_manager
 
 
 def main() -> int:
-    app, window, _controller, _input_manager = build_application()
+    app, window, controller, _input_manager = build_application()
+    logger = controller.logger
+    app.aboutToQuit.connect(window.shutdown)
+    interrupt_timer = QTimer()
+    interrupt_timer.setInterval(200)
+    interrupt_timer.timeout.connect(lambda: None)
+    interrupt_timer.start()
+
+    interrupted = False
+
+    def handle_sigint(_signum, _frame) -> None:
+        nonlocal interrupted
+        if interrupted:
+            return
+        interrupted = True
+        logger.info("Maidie interrupted by user. Shutting down...")
+        QTimer.singleShot(0, window.request_exit)
+
+    previous_sigint = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, handle_sigint)
     window.show()
-    return app.exec()
+    try:
+        exit_code = app.exec()
+    except KeyboardInterrupt:
+        logger.info("Maidie interrupted by user. Shutting down...")
+        window.shutdown()
+        exit_code = 0
+    except Exception:
+        logger.exception("Unhandled exception in Maidie")
+        window.shutdown()
+        exit_code = 1
+    finally:
+        interrupt_timer.stop()
+        window.shutdown()
+        signal.signal(signal.SIGINT, previous_sigint)
+    return exit_code
 
 
 if __name__ == "__main__":

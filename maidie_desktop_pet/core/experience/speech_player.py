@@ -181,3 +181,11 @@ class SpeechPlayer(QObject):
         if self._active and self._producer_finished and not self._queue and self._current is None:
             self._active = False
             self.finished.emit()
+
+    def stop(self) -> None:
+        self._timer.stop()
+        self._queue.clear()
+        self._buffer = ""
+        self._current = None
+        self._active = False
+        self._producer_finished = True

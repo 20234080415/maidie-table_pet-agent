@@ -26,6 +26,7 @@ start_maidie.bat
 ```
 
 脚本会在首次启动时创建 `.venv` 并安装 `requirements.txt` 中的依赖。
+后续启动会直接使用该虚拟环境；依赖文件更新后，请手动重新执行安装命令。
 
 ## 手动启动
 
@@ -104,14 +105,14 @@ dist\installer\Maidie-Setup.exe
 
 安装包按当前用户安装到 `%LOCALAPPDATA%\Programs\Maidie`，无需管理员权限，并创建开始菜单快捷方式。桌面快捷方式由用户在安装界面选择。
 
-升级安装不会覆盖用户已经修改的 `config\config.json`；卸载时也会保留配置和本地记忆数据库，避免误删用户数据。若 Inno Setup 安装在自定义位置，可设置：
+升级安装不会覆盖用户已经修改的 `config\config.json`；卸载时也会保留该配置。运行时创建的本地记忆不属于安装包文件，不会被安装升级覆盖。若 Inno Setup 安装在自定义位置，可设置：
 
 ```powershell
 $env:INNO_SETUP_COMPILER = "D:\Tools\Inno Setup 6\ISCC.exe"
 .\build_installer.bat 0.1.0
 ```
 
-`packaging/maidie.ico` 同时用于应用 EXE、安装程序和快捷方式。透明图标源文件为 `packaging/maidie-icon.png`。
+安装程序默认创建开始菜单快捷方式，桌面快捷方式由用户在安装界面选择。`packaging/maidie.ico` 同时用于应用 EXE、安装程序和快捷方式；透明图标源文件为 `packaging/maidie-icon.png`。
 
 ## 启动问题排查
 

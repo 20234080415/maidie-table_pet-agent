@@ -3,8 +3,12 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
-from core.version import APP_AUTHOR, APP_DESCRIPTION, APP_NAME, APP_VERSION
+from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtCore import QUrl
 
+from core.version import (
+    APP_AUTHOR, APP_DESCRIPTION, APP_GITHUB_URL, APP_NAME, APP_TECH_STACK, APP_VERSION,
+)
 
 class AboutPage(QWidget):
     """Application identity and capability summary."""
@@ -15,7 +19,7 @@ class AboutPage(QWidget):
         title.setObjectName("aboutAppName")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 22px; font-weight: 700; color: #704653;")
-        version = QLabel(f"版本：v{APP_VERSION}")
+        version = QLabel(f"当前版本：{APP_VERSION}")
         version.setObjectName("aboutVersion")
         version.setAlignment(Qt.AlignmentFlag.AlignCenter)
         description = QLabel(APP_DESCRIPTION)
@@ -23,17 +27,18 @@ class AboutPage(QWidget):
         description.setAlignment(Qt.AlignmentFlag.AlignCenter)
         description.setWordWrap(True)
         details = QLabel(
-            f"作者：{APP_AUTHOR}<br>技术栈：Python + PyQt6 + LLM Agent<br><br>"
-            "<b>当前能力</b><br>透明桌宠窗口 · 动画与鼠标互动 · 流式聊天<br>"
-            "Agent 工具调用 · 屏幕与窗口感知 · 围栏模式<br>"
-            "本地记忆 · 联网搜索 · 可扩展动作系统"
+            f"作者：{APP_AUTHOR}<br>技术栈：{APP_TECH_STACK}<br><br>"
+            "Maidie 是一个行为驱动的 AI 桌面女仆，也是一个正在成长中的桌面 Agent。<br><br>"
+            "<b>当前能力</b><br>桌宠动画 · 点击 / 拖拽 / 缩放 · 围栏与回弹<br>"
+            "聊天气泡 · LLM 对话 · 工具调用 · 记忆系统<br>"
+            "搜索工具 · OCR / Window 感知开发中"
         )
         details.setObjectName("aboutDetails")
         details.setAlignment(Qt.AlignmentFlag.AlignCenter)
         details.setWordWrap(True)
-        github = QPushButton("GitHub（链接待发布）")
-        github.setObjectName("githubPlaceholder")
-        github.setEnabled(False)
+        github = QPushButton(f"GitHub（{APP_GITHUB_URL}）")
+        github.setObjectName("githubButton")
+        github.clicked.connect(self.open_github)
         changelog = QPushButton("更新日志（即将提供）")
         changelog.setObjectName("changelogPlaceholder")
         changelog.setEnabled(False)
@@ -48,3 +53,6 @@ class AboutPage(QWidget):
         layout.addStretch(1)
         layout.addWidget(github)
         layout.addWidget(changelog)
+
+    def open_github(self) -> None:
+        QDesktopServices.openUrl(QUrl(APP_GITHUB_URL))

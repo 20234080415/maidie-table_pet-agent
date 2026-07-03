@@ -32,6 +32,27 @@ class BrainPlanner:
             return self._with_attention(plan, attention)
         return self._with_attention(self.plan(user_input, memory, clipboard_text), attention)
 
+    def plan_route(self, user_input: str, route: dict[str, Any]) -> dict[str, Any]:
+        """Turn normalized router metadata into a deterministic tool plan."""
+        task_type = str(route.get("task_type") or "none")
+        entities = dict(route.get("entities") or {})
+        if task_type == "time_now":
+            steps = [self._step("time", "now", {"action": "now"})]
+        elif task_type == "time_delta":
+            params = {"action": "delta_until",
+                      "target_time_text": str(entities.get("target_time_text") or ""),
+                      "event": str(entities.get("event") or "")}
+            steps = [self._step("time", "delta_until", params)]
+        elif task_type == "weather":
+            steps = [self._step("weather", "weather", {"query": user_input,
+                                                          "location": str(entities.get("location") or "")})]
+        elif task_type == "search":
+            steps = [self._step("search", "search", {"query": str(entities.get("query") or user_input),
+                                                        "query_source": "router_entity"})]
+        else:
+            return self.plan_for_intent(user_input, str(route.get("intent") or "chat"))
+        return {"goal": str(user_input).strip(), "steps": steps}
+
     @staticmethod
     def _with_attention(plan: dict[str, Any], attention: dict[str, Any] | None) -> dict[str, Any]:
         if attention:
