@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.settings import PERSONALITY_PRESETS
+from ui.settings import AboutPage, HelpPage
 
 
 BASE_STYLE = """
@@ -118,16 +119,18 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.controller = controller
         self.settings = controller.settings_snapshot()
-        self.setWindowTitle("Maidie 性格与模型")
-        self.resize(500, 420)
+        self.setWindowTitle("Maidie 设置")
+        self.resize(720, 540)
         self.setStyleSheet(BASE_STYLE)
 
-        tabs = QTabWidget()
-        tabs.addTab(self._build_personality_tab(), "性格")
-        tabs.addTab(self._build_model_tab(), "模型与 API")
-        tabs.addTab(self._build_network_tab(), "联网查询")
-        tabs.addTab(self._build_vision_tab(), "千问视觉")
-        tabs.addTab(self._build_proactive_tab(), "主动行为")
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_personality_tab(), "性格")
+        self.tabs.addTab(self._build_model_tab(), "模型与 API")
+        self.tabs.addTab(self._build_network_tab(), "联网查询")
+        self.tabs.addTab(self._build_vision_tab(), "千问视觉")
+        self.tabs.addTab(self._build_proactive_tab(), "主动行为")
+        self.tabs.addTab(HelpPage(), "帮助与说明")
+        self.tabs.addTab(AboutPage(), "关于 Maidie")
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
@@ -136,7 +139,7 @@ class SettingsDialog(QDialog):
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
-        layout.addWidget(tabs)
+        layout.addWidget(self.tabs)
         layout.addWidget(buttons)
 
     def _build_personality_tab(self) -> QWidget:

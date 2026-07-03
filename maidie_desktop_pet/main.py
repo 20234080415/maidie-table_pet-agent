@@ -21,6 +21,7 @@ from core.awareness.context import AwarenessContext
 from core.proactive import ProactiveEngine, ProactiveRuntime
 from core.tasks import TaskScheduler
 from core.vision import ScreenReader, VisionService
+from core.version import APP_NAME, APP_VERSION
 from input.manager import InputManager
 from memory.memory import ConversationMemory
 from ui.window import PetWindow
@@ -33,7 +34,8 @@ ROOT = Path(__file__).resolve().parent
 def build_application() -> tuple[QApplication, PetWindow, PetController, InputManager]:
     logger = setup_logger(ROOT / "logs" / "maidie.log")
     app = QApplication.instance() or QApplication(sys.argv)
-    app.setApplicationName("Maidie")
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(APP_VERSION)
     app.setQuitOnLastWindowClosed(True)
 
     config_store = ConfigStore(ROOT / "config" / "config.json")
