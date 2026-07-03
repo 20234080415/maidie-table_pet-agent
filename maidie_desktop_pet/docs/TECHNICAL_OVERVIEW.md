@@ -119,3 +119,17 @@ Qwen VL 只提取屏幕摘要、可见文字、任务类型、重要区域和置
 - 短期事件时间在应用重启后清除。
 - OCR 质量取决于 Tesseract、语言包、缩放和画面清晰度。
 - 系统工具不是任意 shell 或通用桌面自动化接口。
+## 屏幕问题求解闭环
+
+用户明确要求查看屏幕时，生产链路为：
+
+```text
+BrainRouter -> BrainPlanner(screen + conditional search)
+  -> ScreenTool -> VisionContext -> ProblemAnalyzer -> ProblemContext
+  -> BrainExecutor(白名单校验，按需 SearchTool)
+  -> Synthesizer(屏幕事实 + 搜索结果 + 记忆上下文)
+```
+
+`ProblemContext` 保存问题类型、可见文本、错误、代码片段、题目、应用上下文、
+置信度及搜索决策。分析器和工具只返回结构化事实；最终用户话术仍只由
+`Synthesizer` 生成。条件搜索没有扩大 Executor 的工具白名单。

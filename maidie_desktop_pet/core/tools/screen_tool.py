@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.brain.problem_analyzer import ProblemAnalyzer
 from core.tools.base import Tool, ToolResult
 from core.vision.errors import VisionAPIError, VisionCaptureError, VisionConfigError
 
@@ -9,9 +10,11 @@ from core.vision.errors import VisionAPIError, VisionCaptureError, VisionConfigE
 class ScreenTool(Tool):
     name = "screen"
 
-    def __init__(self, awareness_provider: Any = None, vision_service: Any = None) -> None:
+    def __init__(self, awareness_provider: Any = None, vision_service: Any = None,
+                 problem_analyzer: ProblemAnalyzer | None = None) -> None:
         self.awareness_provider = awareness_provider
         self.vision_service = vision_service
+        self.problem_analyzer = problem_analyzer or ProblemAnalyzer()
 
     def match(self, query: str) -> bool:
         return False  # Only BrainRouter may invoke screen capture.
@@ -33,6 +36,7 @@ class ScreenTool(Tool):
                        "confidence": context.confidence, "vision_scope": scope,
                        "vision_session_hit": session_hit,
                        "vision_session_age": session.age()}
+                raw["problem_context"] = self.problem_analyzer.analyze(context).to_dict()
                 if selected_rect is not None:
                     raw["selected_region_rect"] = selected_rect
             else:

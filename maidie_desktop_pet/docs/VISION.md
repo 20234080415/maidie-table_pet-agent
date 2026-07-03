@@ -36,6 +36,17 @@ https://{WorkspaceId}.{Region}.maas.aliyuncs.com/compatible-mode/v1
   → 最终回复
 ```
 
+视觉结果会进一步交给 `ProblemAnalyzer`，转换为 `ProblemContext`：
+
+```text
+problem_type / visible_text / error_message / code_snippet / question_text
+app_context / confidence / needs_search / search_query
+```
+
+报错类问题只有在视觉置信度达到阈值且提取到明确错误信息时才会执行条件搜索；
+题目和低置信度结果不会为了“碰运气”而搜索。搜索步骤使用分析器给出的查询，
+不使用截图本身，也不会执行 shell 或修改文件。
+
 结构化事实可包含屏幕摘要、可见文字、任务类型、重要区域、建议查看位置和置信度。Qwen VL 的输出仍属于外部模型结果，Synthesizer 不应补全未观察到的内容。
 
 ## 配置
@@ -105,3 +116,5 @@ python -m unittest -v tests.test_qwen_vision tests.test_vision_scopes `
 - 没有独立的本地图片文件选择器；“看图”指屏幕中正在显示的图片。
 - OCR 与 Qwen VL 尚未组合成自动降级链路。
 - 视觉结果受模型权限、配额、网络和画面清晰度影响。
+- 问题分析依赖可见文本质量；模糊、截断或多语言混排可能导致字段不完整。
+- 当前自动搜索主要面向高置信度代码报错，普通题目默认由已有事实直接求解。

@@ -22,6 +22,9 @@ class BrainExecutor:
             tool_name = str(step.get("tool", "")) if isinstance(step, dict) else ""
             try:
                 params = step.get("params", {}) if isinstance(step.get("params"), dict) else {}
+                params = self._resolve_dependent_params(tool_name, params, executions)
+                if params is None:
+                    continue
                 if tool_name not in self.ALLOWED_TOOLS:
                     result = self._error(tool_name, "tool blocked by executor")
                 else:
@@ -45,6 +48,26 @@ class BrainExecutor:
                 "data": safe_result,
             })
         return executions
+
+    @staticmethod
+    def _resolve_dependent_params(name: str, params: dict[str, Any],
+                                  executions: list[dict[str, Any]]) -> dict[str, Any] | None:
+        safe = dict(params)
+        if name != "search" or safe.get("query_from") != "problem_context":
+            return safe
+        screen = next((item for item in reversed(executions)
+                       if item.get("tool") == "screen" and item.get("ok")), None)
+        raw = screen.get("data", {}).get("raw", {}) if screen else {}
+        problem = raw.get("problem_context", {}) if isinstance(raw, dict) else {}
+        if not isinstance(problem, dict) or not problem.get("needs_search"):
+            return None
+        query = str(problem.get("search_query") or "").strip()
+        if not query:
+            return None
+        safe.pop("query_from", None)
+        safe.pop("conditional", None)
+        safe["query"] = query
+        return safe
 
     def _execute_tool(self, name: str, user_input: str,
                       params: dict[str, Any]) -> dict[str, Any]:

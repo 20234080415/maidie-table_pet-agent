@@ -38,7 +38,9 @@ class Synthesizer:
             mark(local_response_used=True)
             normalized = {"text": "主人想让我搜什么呀？", "emotion": "shy",
                           "action": "talk", "state": "talking", "source": source}
-        elif any(item.get("tool") == "search" and not item.get("ok") for item in tool_data):
+        elif (any(item.get("tool") == "search" and not item.get("ok") for item in tool_data)
+              and not any(item.get("tool") == "screen" and item.get("ok")
+                          for item in tool_data)):
             mark(local_response_used=True)
             normalized = self._local_fallback(source, tool_data)
         elif self.should_use_local_tool_response(user_input, tool_data):
@@ -134,10 +136,22 @@ class Synthesizer:
             elif kind == "weather":
                 text = f"{raw.get('city', '')}气温 {raw.get('temperature', '未知')}，天气 {raw.get('forecast', '未知')}。"
             elif kind == "screen":
-                screen_text = str(raw.get("screen_text") or raw.get("screenshot_summary") or "").strip()
-                text = (screen_text if screen_text else
-                        f"当前外部窗口是 {raw.get('window') or raw.get('app', '未知窗口')}，"
-                        f"场景为 {raw.get('context', 'unknown')}。")
+                problem = raw.get("problem_context", {})
+                problem = problem if isinstance(problem, dict) else {}
+                error = str(problem.get("error_message") or "").strip()
+                question = str(problem.get("question_text") or "").strip()
+                visible = str(problem.get("visible_text") or "").strip()
+                screen_text = str(raw.get("screen_text") or raw.get("screenshot_summary")
+                                  or visible).strip()
+                if error:
+                    text = (f"我在屏幕上识别到：{error}。搜索补充资料暂时不可用；"
+                            "可以先检查报错对应的代码位置、输入值和依赖版本。")
+                elif question:
+                    text = f"我识别到的题目是：{question}。目前只能依据屏幕内容继续分析。"
+                else:
+                    text = (screen_text if screen_text else
+                            f"当前外部窗口是 {raw.get('window') or raw.get('app', '未知窗口')}，"
+                            f"场景为 {raw.get('context', 'unknown')}。")
             elif kind == "search":
                 text = str(raw.get("summary") or raw.get("error") or "暂时没查到可靠资料。")
             else:

@@ -94,9 +94,19 @@ class BrainPlanner:
 
     @staticmethod
     def screen_plan(user_input: str) -> dict[str, Any]:
-        return {"goal": str(user_input).strip(), "steps": [
-            BrainPlanner._step("screen", "读取当前桌面事实", {"force": True})
-        ]}
+        text = str(user_input).strip()
+        steps = [
+            BrainPlanner._step("screen", "读取当前桌面事实", {"force": True}),
+            BrainPlanner._step("search", "按屏幕问题检索补充事实", {
+                "query_from": "problem_context", "conditional": True,
+                "query_source": "screen_problem_analyzer",
+            }),
+        ]
+        if re.search(r"结合.*(?:之前|以前|上次)|记得.*(?:之前|上次)|memory|previous", text, re.I):
+            steps.append(BrainPlanner._step("memory", "读取相关历史上下文", {
+                "kind": "recent", "limit": 10,
+            }))
+        return {"goal": text, "steps": steps}
 
     @staticmethod
     def code_plan(user_input: str) -> dict[str, Any]:
