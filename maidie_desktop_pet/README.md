@@ -1,446 +1,101 @@
 # Maidie Desktop Pet
 
-Maidie 是一个常驻 Windows 桌面的二次元 AI 女仆桌宠。项目使用 Python、PyQt6、
-hatch-pet WebP 动画图集和 DeepSeek/OpenAI 兼容接口，具备透明置顶窗口、自然移动、
-鼠标互动、流式聊天、技术问题路由、最近聊天、人格设置和可扩展动作系统。
+Maidie 是一个运行在 Windows 桌面的 Python + PyQt6 AI 女仆桌宠，也是具备明确隐私与执行边界的本地桌面 Agent。
 
-## 当前功能
+## 项目简介
 
-### 桌面窗口
+Maidie 将透明置顶桌宠、动画与鼠标互动、流式聊天和结构化工具调用放在同一条生产链路中。模型负责理解与表达，工具负责提供时间、天气、搜索、屏幕和记忆等事实；涉及系统写入的操作必须再次确认。
 
-- 无边框、透明背景、始终置顶。
-- 默认尺寸 `160×190`，最小可缩至约 `36×43`。
-- 支持窗口边缘、滚轮、右键菜单和右下角奶油白角标缩放。
-- 右下角角标只在鼠标位于桌宠窗口范围内时显示。
-- 角色始终保持原始宽高比，以原始 `192×208` 帧和高 DPI 画布重新渲染。
-- 缩小后再次放大不会使用低清缓存。
-- 气泡和输入框是独立跟随浮窗，会避开角色并跟随 Maidie 移动。
+## 当前能力
 
-### 动画系统
+- 透明置顶窗口、角色动画、拖拽缩放、聊天气泡与围栏模式
+- DeepSeek / OpenAI Chat Completions 兼容聊天接口
+- `BrainRouter → Planner → Executor → ToolRegistry → Synthesizer` Agent 链路
+- 当前时间、事件倒计时、天气、Tavily 搜索、本地 SQLite 记忆
+- 按需调用 `qwen3-vl-flash` 理解当前窗口、全屏、鼠标附近或手动框选区域
+- 可选本地 Tesseract OCR、桌面感知和默认关闭的主动行为
+- 数据驱动的 WebP 动作扩展、Windows EXE 与安装包构建
 
-- 主模型为 hatch-pet 标准 `1536×1872`、8 列 9 行 WebP 图集。
-- 每格 `192×208`，动画速度不受窗口尺寸影响。
-- 动作切换包含约 `160ms` 交叉过渡，减少突然跳帧。
-- 支持通过 `assets/actions/actions.json` 加载额外动作条。
-- 外部动作具备独立帧率、持续时间、冷却时间、优先级和触发条件。
-- 待机时瞳孔跟随光标；眨眼帧、走路和其他动作不会错误应用眼球覆盖。
+## 快速启动
 
-### 移动与自主行为
+环境要求：Windows 10/11、Python 3.10+。
 
-- 加速度、速度、目标点和屏幕边界由独立移动控制器管理。
-- 低速自动切换 `walk`，高速自动切换 `run`，速度归零后进入 `idle`。
-- 自动游走、目的性停顿、屏幕边缘避让。
-- 偶尔靠近光标；可在配置中开启持续光标追逐。
-- 自主停顿期间可能播放瞌睡动作。
-
-### 鼠标与键盘互动
-
-- 单击头顶：摸头反应，不调用 AI。
-- 在头顶按住并左右来回滑动：识别为连续抚摸。
-- 在头顶明显纵向移动或单向大幅移动：仍然拖动窗口。
-- 单击脸颊：戳脸反应。
-- 单击身体：调用 AI 进行自然回复。
-- 向右拖动并松手：播放晕乎动作。
-- 双击 Maidie，或按 `Enter`、空格：打开聊天输入框。
-- 输入框按 `Esc`、失去焦点、发送完成或 10 秒无操作后自动收起。
-- 输入过程中无操作计时会自动重置。
-
-### AI 与聊天
-
-- DeepSeek/OpenAI Chat Completions 兼容接口。
-- SSE 流式回复，气泡会随分块实时更新。
-- 日常交流走聊天模型；代码、报错、编译、SSH、Linux、调试和架构等内容走技术模型。
-- Maidie 聊天默认最多两句话；技术模式允许较完整的说明。
-- 所有最终回复统一规范化为五字段：
-
-```json
-{
-  "text": "回复正文",
-  "emotion": "idle|thinking|excited|sad",
-  "action": "talk|thinking",
-  "state": "talking|thinking",
-  "source": "chat|codex"
-}
-```
-
-`source: "codex"` 是项目内部保留的“技术路由”标签；当前默认技术模型仍由
-DeepSeek 提供，不代表正在调用 OpenAI Codex。
-
-### 人格与记忆
-
-- 温柔傲娇、元气活泼、安静治愈、优雅女仆四种预设。
-- 支持自定义人格描述，保存后立即生效。
-- JSON 保存最近 10 条聊天。
-- 右键可以查看或清除最近聊天。
-- 已预留 SQLite、向量记忆和多角色扩展位置。
-
-## 核心状态与优先级
-
-中央状态机是唯一状态来源，状态只能通过 `PetController` 修改。
-
-| 状态 | 用途 |
-|---|---|
-| `idle` | 待机、眨眼、视线跟随 |
-| `walk` | 低速移动 |
-| `run` | 高速移动 |
-| `talking` | AI 回复或情绪表达 |
-| `thinking` | AI 请求、等待用户输入 |
-| `reacting` | 摸头、戳脸、拖动等互动 |
-| `sleeping` | 瞌睡和休息行为 |
-
-行为优先级从高到低：
-
-1. 用户点击、摸头、戳脸、拖动。
-2. 光标互动。
-3. AI 思考和说话。
-4. 自动游走、停顿和瞌睡。
-5. 普通待机。
-
-## 当前动画与触发方式
-
-### 主图集动画
-
-| 动画 | 用途 |
-|---|---|
-| `idle` | 待机与眨眼 |
-| `walk-left/right` | 左右慢速移动 |
-| `run-left/right` | 左右快速移动 |
-| `thinking` | AI 工作中 |
-| `talking` | 普通回复 |
-| `waiting` | 等待用户输入 |
-| `review` | 技术回复或审阅 |
-| `failed` | 请求失败或低落 |
-| `happy` | 开心跳跃 |
-| `reacting` | 普通互动 |
-| `sleeping` | 休息状态 |
-
-### 外部动作条
-
-| 动作 | 触发方式 | 冷却时间 |
-|---|---|---:|
-| `headpat` | 点击头顶或左右抚摸 | 850ms |
-| `facepoke` | 点击脸颊 | 900ms |
-| `shy` | 可爱、喜欢、漂亮、cute、love 等表达 | 5s |
-| `celebrate` | 成功、完成、搞定、感谢、success 等表达 | 4s |
-| `sleepy` | 自主行为偶发 | 30s |
-| `dizzy-right` | 向右拖动超过阈值并松手 | 1.5s |
-
-完整配置位于 `assets/actions/actions.json`。
-
-## 安装与启动
-
-### 环境要求
-
-- Windows 10/11。
-- Python 3.10 或更高版本。
-- 推荐使用独立虚拟环境。
-
-### 快速启动
-
-双击：
-
-```text
-start_maidie.bat
-```
-
-脚本会在首次启动时创建 `.venv` 并安装依赖。
-
-### 手动启动
+双击 `start_maidie.bat`，或手动运行：
 
 ```powershell
-cd "C:\Users\85949\Desktop\桌宠\maidie\maidie_desktop_pet"
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python main.py
 ```
 
-主要依赖：
+## 基础配置
 
-- `PyQt6`：桌面窗口与交互。
-- `requests`：AI API 和 SSE 流式传输。
-- `Pillow`：导入绿幕动作条时使用。
+启动后右键 Maidie，打开“性格与模型设置”，配置聊天模型、技术模型、人格、Tavily 搜索和千问视觉。API Key 会以本地明文写入 `config/config.json`；推荐优先使用环境变量，且绝不能提交真实配置。
 
-## 模型与 API 配置教程
+## 常用操作
 
-### 方法一：使用右键设置界面（推荐）
+- 双击角色或按 Enter / 空格：打开输入框
+- 点击头顶或左右抚摸：摸头互动
+- 点击脸颊：戳脸互动
+- 拖动角色：移动 Maidie
+- 右键角色：设置、围栏、帮助、关于与退出
+- 明确说“看当前窗口”“看鼠标这块”或“我框选一下”：进入对应视觉范围
 
-1. 启动 Maidie。
-2. 右键角色。
-3. 选择“性格与模型设置”。
-4. 打开“模型与 API”页。
-5. 选择 DeepSeek 或其他 OpenAI 兼容接口。
-6. 填写 Base URL、聊天模型、技术模型和 API Key。
-7. 点击“保存并立即应用”。
-
-Key 输入框使用密码模式。已有 Key 时留空会保留原值，不会清空配置。
-
-### 方法二：使用环境变量（更安全）
-
-仅对当前 PowerShell 窗口生效：
-
-```powershell
-$env:DEEPSEEK_API_KEY = "你的 API Key"
-python main.py
-```
-
-写入当前 Windows 用户环境变量：
-
-```powershell
-[Environment]::SetEnvironmentVariable(
-  "DEEPSEEK_API_KEY",
-  "你的 API Key",
-  "User"
-)
-```
-
-重新启动 Maidie 后生效。使用 DeepSeek 接口时，环境变量优先于 JSON 中保存的 Key。
-
-### 方法三：编辑 config.json
-
-配置文件路径：
+## Agent 架构
 
 ```text
-config/config.json
+User / Proactive
+  → PetController
+  → BrainRouter / LLMIntentRouter
+  → BrainPlanner
+  → BrainExecutor / ToolRegistry
+  → Synthesizer → MaidieStyle
+  → PyQt UI / Animation
 ```
 
-完整示例：
+工具只返回结构化事实，最终用户回复统一由 Synthesizer 生成。
 
-```json
-{
-  "ai": {
-    "provider": "deepseek",
-    "api_key": "YOUR_API_KEY_HERE",
-    "base_url": "https://api.deepseek.com",
-    "model": "deepseek-v4-flash",
-    "timeout": 30
-  },
-  "codex": {
-    "api_key": "",
-    "base_url": "https://api.deepseek.com",
-    "model": "deepseek-v4-pro",
-    "timeout": 90
-  },
-  "personality": {
-    "preset": "gentle_tsundere",
-    "custom_prompt": ""
-  },
-  "movement": {
-    "walk_speed": 70,
-    "run_speed": 175,
-    "walk_threshold": 4,
-    "run_threshold": 105,
-    "acceleration": 360,
-    "cursor_chase": false
-  },
-  "window": {
-    "width": 160,
-    "height": 190,
-    "minimum_width": 36,
-    "minimum_height": 43,
-    "always_on_top": true,
-    "opacity": 1.0
-  }
-}
-```
+## 结构化任务理解
 
-### 配置字段说明
-
-| 字段 | 说明 |
-|---|---|
-| `ai.provider` | `deepseek` 或自定义兼容接口标识 |
-| `ai.api_key` | 聊天接口 Key；推荐使用环境变量 |
-| `ai.base_url` | OpenAI Chat Completions 兼容地址，不要以 `/` 结尾 |
-| `ai.model` | 日常聊天模型 |
-| `ai.timeout` | 聊天请求超时秒数 |
-| `codex.model` | 技术问题使用的模型 |
-| `codex.timeout` | 技术请求超时秒数 |
-| `personality.preset` | 人格预设 ID |
-| `personality.custom_prompt` | 自定义人格；预设为 `custom` 时使用 |
-| `movement.walk_speed` | 自动慢走目标速度 |
-| `movement.run_speed` | 自动奔跑目标速度 |
-| `movement.walk_threshold` | 超过该速度进入 `walk` |
-| `movement.run_threshold` | 超过该速度进入 `run` |
-| `movement.acceleration` | 加速度，越高启动和转向越快 |
-| `movement.cursor_chase` | 是否允许持续跟随光标 |
-| `window.width/height` | 启动尺寸 |
-| `window.minimum_width/height` | 允许缩小的下限 |
-| `window.always_on_top` | 是否始终置顶 |
-| `window.opacity` | 整体窗口透明度，范围 `0.0–1.0` |
-
-安全提示：`config.json` 中的 Key 是明文。不要把包含真实 Key 的配置提交到公开仓库、
-截图或发送给他人；长期使用时优先选择环境变量。
-
-## 性格配置
-
-在右键“性格与模型设置”中选择：
-
-| ID | 显示名称 |
-|---|---|
-| `gentle_tsundere` | 温柔傲娇 |
-| `cheerful` | 元气活泼 |
-| `healing` | 安静治愈 |
-| `elegant_maid` | 优雅女仆 |
-| `custom` | 自定义 |
-
-选择“自定义”后，在文本框中描述希望的语气、亲密程度和表达习惯。设置会写入
-`config/config.json` 并热更新，无需重启。
-
-## 添加新动作
-
-### 素材建议
-
-- 单张横向绿幕动作条。
-- 所有帧从左到右排列，宽度平均分割。
-- 推荐 6–8 帧。
-- 人物比例、基线、服装和视角保持一致。
-- 背景使用纯绿色，避免阴影、文字、网格和跨帧元素。
-
-### 导入动作条
-
-```powershell
-python tools/import_action_strip.py "输入动作.png" "assets/actions/action-name.webp" --frames 6
-```
-
-保留跳跃等纵向移动：
-
-```powershell
-python tools/import_action_strip.py "庆祝.png" "assets/actions/celebrate.webp" `
-  --frames 6 --preserve-vertical
-```
-
-移除地面阴影或其他独立组件：
-
-```powershell
-python tools/import_action_strip.py "动作.png" "assets/actions/action-name.webp" `
-  --frames 6 --largest-component
-```
-
-导入器会：
-
-- 自动去绿和抑制绿边。
-- 使用统一比例缩放所有帧。
-- 输出标准 `192×208` 帧。
-- 清除完全透明像素中的隐藏 RGB。
-- 生成无损 WebP 动作条和 GIF 预览。
-
-然后在 `assets/actions/actions.json` 注册：
-
-```json
-{
-  "action-name": {
-    "file": "action-name.webp",
-    "frames": 6,
-    "interval": 150,
-    "render_scale": 1.0,
-    "loop": false,
-    "duration_ms": 1100,
-    "cooldown_ms": 1000,
-    "priority": 80,
-    "state": "reacting",
-    "triggers": ["触发词"]
-  }
-}
-```
-
-动作元数据由 `ActionRegistry` 读取，不需要把关键词继续写进 `PetController`。
-
-## 项目结构
+Router 输出 `intent`、`task_type`、`entities`、`needs_tools`、`confidence` 和 `reason`。例如：
 
 ```text
-maidie_desktop_pet/
-├── main.py                     # 程序入口与依赖装配
-├── start_maidie.bat            # Windows 快速启动
-├── requirements.txt
-├── ai/
-│   ├── client.py               # OpenAI 兼容接口与 SSE 流式请求
-│   ├── router.py               # 日常聊天/技术请求路由
-│   └── prompt.py               # Maidie 与技术模式提示词
-├── animation/
-│   ├── base.py                 # 动画后端接口
-│   └── atlas.py                # 主图集与外部动作播放器
-├── assets/
-│   ├── spritesheet.webp        # hatch-pet 主图集
-│   ├── pet.json
-│   └── actions/                # 外部动作、预览和动作配置
-├── config/
-│   └── config.json             # 模型、人格、移动和窗口配置
-├── core/
-│   ├── actions.py              # 动作注册表、触发词与冷却
-│   ├── behavior.py             # 自主行为规划
-│   ├── movement.py             # 速度、加速度与边界
-│   ├── pet.py                  # 唯一中央控制器
-│   ├── settings.py             # 配置持久化与热更新
-│   ├── state.py                # 状态机与行为优先级
-│   └── plugins/                # 插件扩展接口
-├── input/
-│   ├── gesture.py              # 抚摸与拖动手势识别
-│   ├── manager.py              # 全局光标追踪
-│   └── resize.py               # 无边框窗口缩放
-├── memory/
-│   └── memory.py               # 最近 10 条 JSON 记忆
-├── tools/
-│   └── import_action_strip.py  # 动作条导入工具
-├── ui/
-│   ├── bubble.py               # 跟随式流消息气泡
-│   ├── chat_input.py           # 跟随式聊天输入框
-│   ├── dialogs.py              # 最近聊天、人格和模型设置
-│   ├── resize_handle.py        # 奶油白缩放角标
-│   ├── sprite.py               # 高 DPI 角色渲染与视线跟随
-│   └── window.py               # 透明桌面窗口
-└── tests/                       # 单元测试
+我5.40下课，现在还有多久下课
 ```
 
-## 扩展接口
-
-- 动画：实现 `AnimationBackend` 可替换为 Live2D、Spine 或其他渲染器。
-- AI：实现 `AIClient` 可接入其他 OpenAI 兼容模型或本地模型。
-- 插件：继承 `core.plugins.Plugin`，监听状态、点击、消息和配置事件。
-- 输入：可继续增加全局热键、STT 和摄像头输入。
-- 输出：可增加 TTS、口型同步和音效。
-- 记忆：可将 `ConversationMemory` 替换为 SQLite 或向量数据库。
+会被识别为 `time_delta`，Planner 调用 `TimeTool.delta_until`。当前运行会话还会暂存“下课 → 5.40”，因此后续可直接问“还有多久下课”；该信息不会写入长期记忆。
 
 ## 测试
-
-运行全部测试：
 
 ```powershell
 python -m unittest discover -v
 ```
 
-当前测试覆盖：
+## Windows 打包
 
-- 状态优先级与锁定。
-- 速度驱动的 idle/walk/run 切换。
-- 屏幕边界保护。
-- AI 路由与五字段输出。
-- 配置保存和 Key 隐藏。
-- 动作关键词与冷却。
-- 抚摸、拖动手势区分。
-- Qt 图集加载、缩放、跟随浮窗和动作恢复的集成检查。
+```powershell
+.\build_exe.bat
+.\build_installer.bat 0.1.0
+```
 
-## 常见问题
+EXE 输出到 `dist\Maidie\Maidie.exe`；安装包输出到 `dist\installer\Maidie-Setup.exe`。详细要求见[安装与启动](docs/SETUP.md)。
 
-### 填了 Key 仍然无法聊天
+## 文档导航
 
-1. 在右键设置中确认 Base URL 和模型名称。
-2. 检查 `logs/maidie.log`。
-3. 确认当前模型支持 `/chat/completions` 和 SSE 流式返回。
-4. 如果同时设置了 `DEEPSEEK_API_KEY`，环境变量会覆盖 JSON Key。
+- [功能说明](docs/FEATURES.md)
+- [安装与启动](docs/SETUP.md)
+- [配置说明](docs/CONFIG.md)
+- [技术架构](docs/TECHNICAL_OVERVIEW.md)
+- [千问视觉与屏幕理解](docs/VISION.md)
+- [动作系统](docs/ACTIONS.md)
+- [隐私与安全边界](docs/PRIVACY_AND_SAFETY.md)
+- [开发指南](docs/DEVELOPMENT.md)
 
-### 气泡或输入框没有跟随
+## 安全提醒
 
-重新启动 Maidie 以加载最新代码。二者现在都是独立浮窗，并在每次角色移动时重新锚定。
+不要提交 `config/config.json`、`.env`、真实 API Key、`memory/*.db*`、私人截图或 `logs/`。任意 shell、文件删除和脚本执行始终被禁止。
 
-### 动作没有播放
+## 项目状态
 
-确认动作文件存在于 `assets/actions/`，文件名、帧数与 `actions.json` 一致，并检查动作冷却时间。
-
-### 缩放后角色模糊
-
-程序始终从原始帧重新渲染，不会累积低清缓存。放大超过素材原生分辨率后出现的柔化，
-属于源图分辨率限制；需要更清晰时应提供更高分辨率模型或升级 Live2D。
-
-### 如何退出
-
-右键 Maidie，选择“退出 Maidie”。
+项目处于开发阶段，主要面向 Windows。当前搜索仅实现 Tavily；OCR 与按需千问视觉是两条独立链路；系统工具刻意限制写入与执行范围。

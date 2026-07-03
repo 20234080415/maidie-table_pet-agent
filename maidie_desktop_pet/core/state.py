@@ -13,11 +13,14 @@ class PetState(str, Enum):
     THINKING = "thinking"
     REACTING = "reacting"
     SLEEPING = "sleeping"
+    WATCHING = "watching"
+    REMINDING = "reminding"
 
 
 class BehaviorPriority(IntEnum):
     IDLE = 0
     AUTONOMOUS = 20
+    PROACTIVE = 50
     AI_TALKING = 60
     CURSOR_INTERACTION = 80
     USER_CLICK = 100

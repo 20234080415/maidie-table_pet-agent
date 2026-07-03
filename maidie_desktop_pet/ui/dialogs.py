@@ -4,6 +4,7 @@ import html
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -11,6 +12,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSpinBox,
     QTabWidget,
     QTextBrowser,
     QTextEdit,
@@ -22,16 +24,53 @@ from core.settings import PERSONALITY_PRESETS
 
 
 BASE_STYLE = """
-QDialog { background: #fff8fb; color: #4a2938; }
-QLabel { color: #5b3547; }
-QLineEdit, QTextEdit, QComboBox, QTextBrowser {
-  background: #fffdfd; color: #452735; border: 1px solid #e2a7bf;
-  border-radius: 8px; padding: 6px; selection-background-color: #e7a7c2;
+QDialog, QWidget {
+  background: #f1e4e7;
+  color: #49343d;
 }
-QPushButton { background: #f3c5d7; color: #4a2938; border: none;
-  border-radius: 8px; padding: 7px 14px; }
-QPushButton:hover { background: #ebb1c9; }
-QTabWidget::pane { border: 1px solid #edc3d3; border-radius: 8px; }
+QLabel, QCheckBox { color: #574049; }
+QLineEdit, QTextEdit, QComboBox, QTextBrowser, QSpinBox {
+  background: #f8eef0;
+  color: #3f3036;
+  border: 1px solid #cfaab4;
+  border-radius: 8px;
+  padding: 6px;
+  selection-background-color: #c98fa1;
+  selection-color: #2e2025;
+}
+QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus {
+  background: #faF2f3;
+  border: 1px solid #b9798d;
+}
+QLineEdit:disabled, QTextEdit:disabled, QComboBox:disabled, QSpinBox:disabled {
+  background: #e6d8dc;
+  color: #89747b;
+}
+QPushButton {
+  background: #d9a8b6;
+  color: #3f2d34;
+  border: 1px solid #c38b9c;
+  border-radius: 8px;
+  padding: 7px 14px;
+}
+QPushButton:hover { background: #ce96a7; }
+QPushButton:pressed { background: #bf8497; }
+QTabWidget::pane {
+  background: #eadadd;
+  border: 1px solid #cda6b1;
+  border-radius: 8px;
+  top: -1px;
+}
+QTabBar::tab {
+  background: #dfc9cf;
+  color: #634852;
+  border: 1px solid #cba7b1;
+  padding: 7px 12px;
+  margin-right: 2px;
+  border-top-left-radius: 7px;
+  border-top-right-radius: 7px;
+}
+QTabBar::tab:selected { background: #eadadd; color: #3f2d34; }
 """
 
 
@@ -75,17 +114,25 @@ class RecentChatsDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, controller, parent=None):
+    def __init__(self, controller, parent=None, initial_tab: str | None = None):
         super().__init__(parent)
         self.controller = controller
         self.settings = controller.settings_snapshot()
-        self.setWindowTitle("Maidie 性格与模型")
-        self.resize(500, 420)
+        self.setWindowTitle("Maidie 设置")
+        self.resize(720, 540)
         self.setStyleSheet(BASE_STYLE)
 
-        tabs = QTabWidget()
-        tabs.addTab(self._build_personality_tab(), "性格")
-        tabs.addTab(self._build_model_tab(), "模型与 API")
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_personality_tab(), "性格")
+        self.tabs.addTab(self._build_model_tab(), "模型与 API")
+        self.tabs.addTab(self._build_network_tab(), "联网查询")
+        self.tabs.addTab(self._build_vision_tab(), "千问视觉")
+        self.tabs.addTab(self._build_proactive_tab(), "主动行为")
+        if initial_tab:
+            for index in range(self.tabs.count()):
+                if self.tabs.tabText(index) == initial_tab:
+                    self.tabs.setCurrentIndex(index)
+                    break
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
@@ -94,15 +141,15 @@ class SettingsDialog(QDialog):
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
-        layout.addWidget(tabs)
+        layout.addWidget(self.tabs)
         layout.addWidget(buttons)
 
     def _build_personality_tab(self) -> QWidget:
         page = QWidget()
         layout = QFormLayout(page)
         self.personality = QComboBox()
-        for key, (label, _description) in PERSONALITY_PRESETS.items():
-            self.personality.addItem(label, key)
+        for key, preset in PERSONALITY_PRESETS.items():
+            self.personality.addItem(preset["name"], key)
         current = self.personality.findData(self.settings.get("personality_preset"))
         self.personality.setCurrentIndex(max(0, current))
         self.personality.currentIndexChanged.connect(self._update_personality_help)
@@ -120,7 +167,9 @@ class SettingsDialog(QDialog):
 
     def _update_personality_help(self) -> None:
         key = self.personality.currentData()
-        self.personality_help.setText(PERSONALITY_PRESETS[key][1] or "使用下面填写的自定义性格。")
+        preset = PERSONALITY_PRESETS[key]
+        description = f"{preset['core_identity']} {preset['tone']}"
+        self.personality_help.setText(description or "使用下面填写的自定义性格。")
         self.custom_personality.setEnabled(key == "custom")
 
     def _build_model_tab(self) -> QWidget:
@@ -149,6 +198,150 @@ class SettingsDialog(QDialog):
         layout.addRow("", note)
         return page
 
+    def _build_network_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QFormLayout(page)
+        self.network_enabled = QCheckBox("允许 Maidie 按当前问题联网查询")
+        self.network_enabled.setChecked(self.settings.get("network_enabled", False))
+        self.network_provider = QComboBox()
+        self.network_provider.addItem("Tavily", "tavily")
+        index = self.network_provider.findData(
+            self.settings.get("network_search_provider", "tavily")
+        )
+        self.network_provider.setCurrentIndex(max(0, index))
+        self.network_api_key = QLineEdit()
+        self.network_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.network_api_key.setPlaceholderText(
+            "已配置；留空保持不变"
+            if self.settings.get("has_network_api_key") else "输入 Tavily API Key"
+        )
+        self.network_timeout = QSpinBox()
+        self.network_timeout.setRange(1, 120)
+        self.network_timeout.setSuffix(" 秒")
+        self.network_timeout.setValue(self.settings.get("network_timeout", 10))
+        self.network_show_sources = QCheckBox("在回答中显示来源")
+        self.network_show_sources.setChecked(
+            self.settings.get("network_show_sources", True)
+        )
+        note = QLabel("联网默认关闭。开启后，只会把当前问题发送给所选搜索服务。")
+        note.setWordWrap(True)
+        layout.addRow("联网开关", self.network_enabled)
+        layout.addRow("搜索服务", self.network_provider)
+        layout.addRow("搜索 API Key", self.network_api_key)
+        layout.addRow("请求超时", self.network_timeout)
+        layout.addRow("来源", self.network_show_sources)
+        layout.addRow("", note)
+        return page
+
+    def _build_proactive_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QFormLayout(page)
+        self.proactive_enabled = QCheckBox("允许 Maidie 根据桌面状态主动提醒")
+        self.proactive_enabled.setChecked(self.settings.get("proactive_enabled", False))
+        self.proactive_tick = QSpinBox()
+        self.proactive_tick.setRange(30, 60)
+        self.proactive_tick.setSuffix(" 秒")
+        self.proactive_tick.setValue(self.settings.get("proactive_tick_seconds", 45))
+        self.proactive_cooldown = QSpinBox()
+        self.proactive_cooldown.setRange(1, 240)
+        self.proactive_cooldown.setSuffix(" 分钟")
+        self.proactive_cooldown.setValue(max(1, self.settings.get("proactive_cooldown_seconds", 900) // 60))
+        self.screen_awareness_enabled = QCheckBox("允许定时截屏并在本机进行 OCR")
+        self.screen_awareness_enabled.setChecked(self.settings.get("screen_awareness_enabled", False))
+        self.screen_awareness_interval = QSpinBox()
+        self.screen_awareness_interval.setRange(30, 600)
+        self.screen_awareness_interval.setSuffix(" 秒")
+        self.screen_awareness_interval.setValue(self.settings.get("screen_awareness_interval", 60))
+        note = QLabel("默认关闭。不会记录键盘内容；启用屏幕理解后，OCR 在本机完成，但相关文字可能随当前 Agent 任务发送给已配置的 AI 服务。节流期间不会重复打扰。")
+        note.setWordWrap(True)
+        layout.addRow("主动开关", self.proactive_enabled)
+        layout.addRow("观察间隔", self.proactive_tick)
+        layout.addRow("最短打扰间隔", self.proactive_cooldown)
+        layout.addRow("屏幕理解", self.screen_awareness_enabled)
+        layout.addRow("OCR 间隔", self.screen_awareness_interval)
+        layout.addRow("", note)
+        return page
+
+    def _build_vision_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QFormLayout(page)
+        self.vision_workspace_id = QLineEdit(
+            self.settings.get("vision_workspace_id", "")
+        )
+        self.vision_workspace_id.setPlaceholderText("阿里云百炼 Workspace ID")
+        self.vision_api_key = QLineEdit()
+        self.vision_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.vision_api_key.setPlaceholderText(
+            "已配置；留空保持不变"
+            if self.settings.get("has_vision_api_key") else "输入 DASHSCOPE API Key"
+        )
+        self.vision_model = QLineEdit(
+            self.settings.get("vision_model", "qwen3-vl-flash")
+        )
+        self.vision_region = QComboBox()
+        self.vision_region.addItem("北京（cn-beijing）", "cn-beijing")
+        region_index = self.vision_region.findData(
+            self.settings.get("vision_region", "cn-beijing")
+        )
+        self.vision_region.setCurrentIndex(max(0, region_index))
+        self.vision_max_width = QSpinBox()
+        self.vision_max_width.setRange(320, 4096)
+        self.vision_max_width.setSuffix(" px")
+        self.vision_max_width.setValue(self.settings.get("vision_max_width", 1280))
+        self.vision_jpeg_quality = QSpinBox()
+        self.vision_jpeg_quality.setRange(40, 100)
+        self.vision_jpeg_quality.setValue(
+            self.settings.get("vision_jpeg_quality", 85)
+        )
+        self.vision_cache_ttl = QSpinBox()
+        self.vision_cache_ttl.setRange(0, 60)
+        self.vision_cache_ttl.setSuffix(" 秒")
+        self.vision_cache_ttl.setValue(
+            self.settings.get("vision_cache_ttl_seconds", 5)
+        )
+        self.vision_default_scope = QComboBox()
+        self.vision_default_scope.addItem("当前窗口", "active_window")
+        self.vision_default_scope.addItem("全屏", "fullscreen")
+        self.vision_default_scope.addItem("鼠标附近", "cursor_region")
+        scope_index = self.vision_default_scope.findData(
+            self.settings.get("vision_default_scope", "active_window")
+        )
+        self.vision_default_scope.setCurrentIndex(max(0, scope_index))
+        self.vision_cursor_width = QSpinBox()
+        self.vision_cursor_width.setRange(200, 4096)
+        self.vision_cursor_width.setSuffix(" px")
+        self.vision_cursor_width.setValue(
+            self.settings.get("vision_cursor_region_width", 1000)
+        )
+        self.vision_cursor_height = QSpinBox()
+        self.vision_cursor_height.setRange(200, 2160)
+        self.vision_cursor_height.setSuffix(" px")
+        self.vision_cursor_height.setValue(
+            self.settings.get("vision_cursor_region_height", 800)
+        )
+        note = QLabel(
+            "只有你明确要求看屏幕、窗口或图片时才会截图并发送给千问视觉；"
+            "截图仅在内存中处理，不会永久保存。环境变量配置优先于这里的设置。"
+        )
+        note.setWordWrap(True)
+        layout.addRow("Workspace ID", self.vision_workspace_id)
+        layout.addRow("API Key", self.vision_api_key)
+        layout.addRow("视觉模型", self.vision_model)
+        layout.addRow("地域", self.vision_region)
+        layout.addRow("图片最大宽度", self.vision_max_width)
+        layout.addRow("JPEG 质量", self.vision_jpeg_quality)
+        layout.addRow("短缓存", self.vision_cache_ttl)
+        layout.addRow("默认截图范围", self.vision_default_scope)
+        layout.addRow("鼠标区域宽度", self.vision_cursor_width)
+        layout.addRow("鼠标区域高度", self.vision_cursor_height)
+        scope_note = QLabel(
+            "建议使用当前窗口。全屏信息更完整但隐私更多；鼠标附近适合按钮和局部内容。"
+        )
+        scope_note.setWordWrap(True)
+        layout.addRow("", scope_note)
+        layout.addRow("", note)
+        return page
+
     def _save(self) -> None:
         values = {
             "provider": self.provider.currentData(),
@@ -158,6 +351,26 @@ class SettingsDialog(QDialog):
             "api_key": self.api_key.text().strip(),
             "personality_preset": self.personality.currentData(),
             "custom_personality": self.custom_personality.toPlainText().strip(),
+            "network_enabled": self.network_enabled.isChecked(),
+            "network_timeout": self.network_timeout.value(),
+            "network_show_sources": self.network_show_sources.isChecked(),
+            "network_search_provider": self.network_provider.currentData(),
+            "network_search_api_key": self.network_api_key.text().strip(),
+            "proactive_enabled": self.proactive_enabled.isChecked(),
+            "proactive_tick_seconds": self.proactive_tick.value(),
+            "proactive_cooldown_seconds": self.proactive_cooldown.value() * 60,
+            "screen_awareness_enabled": self.screen_awareness_enabled.isChecked(),
+            "screen_awareness_interval": self.screen_awareness_interval.value(),
+            "vision_workspace_id": self.vision_workspace_id.text().strip(),
+            "vision_api_key": self.vision_api_key.text().strip(),
+            "vision_model": self.vision_model.text().strip(),
+            "vision_region": self.vision_region.currentData(),
+            "vision_max_width": self.vision_max_width.value(),
+            "vision_jpeg_quality": self.vision_jpeg_quality.value(),
+            "vision_cache_ttl_seconds": self.vision_cache_ttl.value(),
+            "vision_default_scope": self.vision_default_scope.currentData(),
+            "vision_cursor_region_width": self.vision_cursor_width.value(),
+            "vision_cursor_region_height": self.vision_cursor_height.value(),
         }
         if not values["base_url"] or not values["chat_model"] or not values["technical_model"]:
             return

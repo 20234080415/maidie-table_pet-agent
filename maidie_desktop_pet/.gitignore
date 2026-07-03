@@ -1,5 +1,10 @@
 __pycache__/
 *.py[cod]
 .venv/
+build/
+dist/
 logs/
 memory/conversations.json
+memory/memories.db
+memory/memories.db-*
+memory/scheduled_tasks.json

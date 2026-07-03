@@ -57,3 +57,7 @@ class ChatInput(QLineEdit):
         super().focusOutEvent(event)
         # Defer until Qt finishes transferring focus, then close the editor.
         QTimer.singleShot(0, self.dismiss)
+
+    def shutdown(self) -> None:
+        self._dismiss_timer.stop()
+        self.hide()

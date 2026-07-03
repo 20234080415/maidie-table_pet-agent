@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from time import monotonic
@@ -9,9 +11,15 @@ from typing import Any, Callable
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
+from animation.direction_manager import DirectionManager
 from core.behavior import AutonomousBehaviorController, BehaviorKind
+from core.experience import AttentionManager, BehaviorOrchestrator, EmotionState
+from core.brain.fast_route import is_simple_time_query, is_weather_query
+from core.fence import FenceController
 from core.movement import Bounds, MovementController, Vec2
+from core.session import AISessionCoordinator
 from core.state import BehaviorPriority, PetState, StateMachine
+from core.vision.intent_rules import VisionScope, detect_vision_scope
 
 
 class PetController(QObject):
@@ -26,8 +34,12 @@ class PetController(QObject):
     request_failed = pyqtSignal(str)
     settings_changed = pyqtSignal(object)
     gaze_changed = pyqtSignal(float, float)
-    _result_ready = pyqtSignal(object)
-    _stream_delta_ready = pyqtSignal(str)
+    facing_changed = pyqtSignal(bool)
+    emotion_changed = pyqtSignal(str)
+    sentence_completed = pyqtSignal(str)
+    local_message_requested = pyqtSignal(str)
+    fence_changed = pyqtSignal(object)
+    region_selection_requested = pyqtSignal(str)
 
     def __init__(
         self,
@@ -37,30 +49,57 @@ class PetController(QObject):
         movement_options: dict[str, Any] | None = None,
         config_store: Any | None = None,
         action_registry: Any | None = None,
+        proactive_runtime: Any | None = None,
+        proactive_tick_seconds: int = 45,
     ) -> None:
         super().__init__()
         self.ai_router = ai_router
         self.memory = memory
         self.logger = logger or logging.getLogger(__name__)
+        self._shutting_down = False
         self.config_store = config_store
         self.action_registry = action_registry
+        self.proactive_runtime = proactive_runtime
         self.state_machine = StateMachine()
         self.movement = MovementController(**(movement_options or {}))
+        self.direction = DirectionManager()
         self.behavior = AutonomousBehaviorController()
+        self.emotion_state = EmotionState()
+        self.attention_manager = AttentionManager()
+        self.behavior_orchestrator = BehaviorOrchestrator()
         self.bounds = Bounds(0, 0, 1920, 1080)
+        self.fence = FenceController()
+        self.drag_active = False
+        self._drag_session = 0
+        self._released_drag_session = -1
+        self._drag_outside_logged = False
+        self._drag_pause_logged = False
         self.cursor = Vec2()
         self.cursor_chase = False
-        self._busy = False
-        self._pending_message = ""
-        self._pending_source = "chat"
-        self._pending_reaction: str | None = None
         self._listeners: dict[str, list[Callable[..., None]]] = defaultdict(list)
         self._plugins: list[Any] = []
-        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="maidie-ai")
-        self._result_ready.connect(self._handle_result)
-        self._stream_delta_ready.connect(self._handle_stream_delta)
+        self._selected_region_rect: tuple[int, int, int, int] | None = None
+        self._user_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="maidie-user")
+        self._proactive_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="maidie-proactive")
+        self._memory_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="maidie-memory")
+        self._executor = self._user_executor  # Compatibility alias.
+        self._proactive_future: Any | None = None
+        self._proactive_poll_timer = QTimer(self)
+        self._proactive_poll_timer.setInterval(15)
+        self._proactive_poll_timer.timeout.connect(self._poll_proactive_future)
+        self.ai_session = AISessionCoordinator(
+            ai_router, self._user_executor, self.logger,
+            self._prepare_ai_request, self._show_stream_fragment,
+            self._on_ai_result, self._on_ai_response_completed,
+            self.sentence_completed.emit, self,
+            thinking_feedback=self.message_delta.emit,
+        )
+        self.chat_streamer = self.ai_session.streamer
         self._last_tick = monotonic()
         self._state_token = 0
+        self._proactive_timer = QTimer(self)
+        self._proactive_timer.timeout.connect(self._proactive_tick)
+        self._proactive_timer.start(max(30, min(60, int(proactive_tick_seconds))) * 1000)
 
         self._tick_timer = QTimer(self)
         self._tick_timer.timeout.connect(self._tick)
@@ -69,6 +108,69 @@ class PetController(QObject):
     @property
     def state(self) -> PetState:
         return self.state_machine.state
+
+    # Compatibility aliases while callers transition to AISessionCoordinator.
+    @property
+    def _busy(self) -> bool:
+        return self.ai_session.busy
+
+    @_busy.setter
+    def _busy(self, value: bool) -> None:
+        self.ai_session.busy = bool(value)
+
+    @property
+    def _pending_message(self) -> str:
+        return self.ai_session.pending_message
+
+    @_pending_message.setter
+    def _pending_message(self, value: str) -> None:
+        self.ai_session.pending_message = value
+
+    @property
+    def _pending_source(self) -> str:
+        return self.ai_session.pending_source
+
+    @_pending_source.setter
+    def _pending_source(self, value: str) -> None:
+        self.ai_session.pending_source = value
+
+    @property
+    def _pending_reaction(self) -> str | None:
+        return self.ai_session.pending_reaction
+
+    @_pending_reaction.setter
+    def _pending_reaction(self, value: str | None) -> None:
+        self.ai_session.pending_reaction = value
+
+    @property
+    def _pending_response(self) -> dict[str, str] | None:
+        return self.ai_session.pending_response
+
+    @_pending_response.setter
+    def _pending_response(self, value: dict[str, str] | None) -> None:
+        self.ai_session.pending_response = value
+
+    @property
+    def _request_future(self) -> Any | None:
+        return self.ai_session.future
+
+    @property
+    def _request_poll_timer(self) -> QTimer:
+        return self.ai_session.poll_timer
+
+    @property
+    def dominant_emotion(self) -> str:
+        return self.emotion_state.get_dominant_emotion()
+
+    def animation_for_dominant_emotion(self) -> str:
+        """Translate the experience state without coupling EmotionState to UI assets."""
+        return {
+            "happy": "happy",
+            "thinking": "waiting",
+            "shy": "shy",
+            "concern": "sad",
+            "failed": "failed",
+        }.get(self.dominant_emotion, "idle")
 
     def on(self, event: str, callback: Callable[..., None]) -> None:
         self._listeners[event].append(callback)
@@ -112,6 +214,28 @@ class PetController(QObject):
                 technical.get("base_url") or ai.get("base_url", "https://api.deepseek.com"),
                 technical.get("model", "deepseek-v4-pro"),
             )
+        synthesizer = getattr(self.ai_router, "synthesizer", None)
+        if synthesizer is not None:
+            synthesizer.personality_prompt = personality
+        for plugin in self._plugins:
+            if hasattr(plugin, "configure"):
+                plugin.configure(config.get("network", {}))
+        if self.proactive_runtime:
+            proactive = config.get("proactive", {})
+            engine = self.proactive_runtime.engine
+            engine.enabled = bool(proactive.get("enabled", False))
+            engine.cooldown_seconds = max(30.0, float(proactive.get("cooldown_seconds", 900)))
+            tick_seconds = max(30, min(60, int(proactive.get("tick_seconds", 45))))
+            self._proactive_timer.setInterval(tick_seconds * 1000)
+            screen_reader = self.proactive_runtime.awareness.screen_reader
+            if screen_reader:
+                vision = config.get("vision", {})
+                screen_reader.enabled = bool(vision.get("enabled", False))
+                screen_reader.interval_seconds = max(30.0, float(vision.get("interval_seconds", 60)))
+        screen_tool = self.ai_router.executor.tool_registry.get("screen")
+        vision_service = getattr(screen_tool, "vision_service", None)
+        if vision_service is not None and hasattr(vision_service, "reconfigure"):
+            vision_service.reconfigure(config.get("vision", {}))
         public = self.config_store.public_settings()
         self.settings_changed.emit(public)
         self._broadcast("on_settings_changed", public)
@@ -146,8 +270,6 @@ class PetController(QObject):
         return True
 
     def _animation_for_state(self, state: PetState) -> str:
-        if state in (PetState.WALK, PetState.RUN):
-            return f"{state.value}-{self.movement.direction}"
         return {
             PetState.REACTING: "reacting",
             PetState.SLEEPING: "sleeping",
@@ -156,15 +278,147 @@ class PetController(QObject):
     def set_screen_bounds(self, left: float, top: float, right: float, bottom: float) -> None:
         self.bounds = Bounds(left, top, right, bottom)
 
+    def active_bounds(self) -> Bounds:
+        return self.fence.active_bounds(
+            self.movement.window_width, self.movement.window_height, self.bounds
+        )
+
+    def enable_fence(self, default_width: float = 360, default_height: float = 260) -> Bounds:
+        center_x = self.movement.position.x + self.movement.window_width / 2
+        center_y = self.movement.position.y + self.movement.window_height / 2
+        rect = self.fence.enable_default(
+            center_x, center_y, self.bounds,
+            self.movement.window_width, self.movement.window_height,
+            default_width, default_height,
+        )
+        self.movement.stop()
+        x, y = self.fence.clamp_point(
+            self.movement.position.x, self.movement.position.y,
+            self.movement.window_width, self.movement.window_height,
+        )
+        self.sync_geometry(x, y, self.movement.window_width, self.movement.window_height)
+        self.position_requested.emit(x, y)
+        self.behavior.postpone(1.0)
+        self._emit_fence_feedback("fence_enabled", "shy")
+        self._log_fence("fence_enabled", rect=rect)
+        self.fence_changed.emit(rect)
+        return rect
+
+    def disable_fence(self) -> None:
+        was_enabled = self.fence.is_enabled()
+        self.fence.disable()
+        self.behavior.postpone(1.0)
+        if was_enabled:
+            self.fence_changed.emit(None)
+            self._emit_fence_feedback("fence_disabled", "celebrate")
+            self._log_fence("fence_disabled")
+
+    def update_fence_rect(self, rect: Any) -> Bounds | None:
+        """Apply a user-edited fence rectangle and keep it inside the screen."""
+        if not self.fence.is_enabled():
+            return None
+        if isinstance(rect, Bounds):
+            left, top, right, bottom = rect.left, rect.top, rect.right, rect.bottom
+        elif hasattr(rect, "x") and hasattr(rect, "width"):
+            left, top = float(rect.x()), float(rect.y())
+            right, bottom = left + float(rect.width()), top + float(rect.height())
+        else:
+            left, top, right, bottom = map(float, rect)
+        min_width = self.movement.window_width + self.fence.padding * 2
+        min_height = self.movement.window_height + self.fence.padding * 2
+        width = min(max(abs(right - left), min_width), self.bounds.right - self.bounds.left)
+        height = min(max(abs(bottom - top), min_height), self.bounds.bottom - self.bounds.top)
+        left = max(self.bounds.left, min(self.bounds.right - width, min(left, right)))
+        top = max(self.bounds.top, min(self.bounds.bottom - height, min(top, bottom)))
+        final_rect = Bounds(left, top, left + width, top + height)
+        self.fence.enable(final_rect)
+        x, y = self.fence.clamp_point(
+            self.movement.position.x, self.movement.position.y,
+            self.movement.window_width, self.movement.window_height,
+        )
+        if (x, y) != (self.movement.position.x, self.movement.position.y):
+            self.sync_geometry(x, y, self.movement.window_width, self.movement.window_height)
+            self.position_requested.emit(x, y)
+        self.fence_changed.emit(final_rect)
+        return final_rect
+
+    def _emit_fence_feedback(self, event: str, action: str) -> None:
+        text = self.fence.dialogues.get(event)
+        self._log_fence("fence_dialogue_event", dialogue_event=event)
+        self._log_fence("fence_dialogue_selected", dialogue=text)
+        if self.fence.dialogues.last_avoided_repeat:
+            self._log_fence("fence_dialogue_avoid_repeat", dialogue_event=event)
+        self.local_message_requested.emit(text)
+        if not self._play_action(action, force=True):
+            animation = "happy" if event == "fence_disabled" else "reacting"
+            self.set_state(PetState.REACTING, BehaviorPriority.USER_CLICK, 700,
+                           force=True, animation=animation)
+
+    def _log_fence(self, event: str, **fields: Any) -> None:
+        try:
+            details = " ".join(f"{key}={value}" for key, value in fields.items())
+            self.logger.debug("%s%s", event, f" {details}" if details else "")
+        except Exception:
+            pass
+
+    def on_pet_drag_started(self) -> None:
+        self.drag_active = True
+        self._drag_session += 1
+        self._drag_outside_logged = False
+        self._drag_pause_logged = False
+        self.movement.stop()
+        self._log_fence("fence_drag_started", drag_session=self._drag_session)
+
+    def on_pet_drag_moved(self, x: float, y: float, width: float, height: float) -> None:
+        if not self.drag_active:
+            return
+        self.sync_geometry(x, y, width, height)
+        if (self.fence.is_enabled()
+                and not self.fence.contains_pet(x, y, width, height)
+                and not self._drag_outside_logged):
+            self._drag_outside_logged = True
+            self._log_fence("fence_drag_moving_outside", x=x, y=y)
+
+    def on_pet_drag_cancelled(self) -> None:
+        self.drag_active = False
+
     def sync_geometry(self, x: float, y: float, width: float, height: float) -> None:
         self.movement.sync_geometry(x, y, width, height)
 
     def on_pet_dragged(
         self, x: float, y: float, width: float, height: float, drag_dx: float = 0.0
     ) -> None:
+        if (self._drag_session > 0 and not self.drag_active
+                and self._released_drag_session == self._drag_session):
+            return
+        if self.drag_active and self._released_drag_session == self._drag_session:
+            return
+        if self.drag_active:
+            self._released_drag_session = self._drag_session
+        self.drag_active = False
         self.movement.stop()
+        was_outside = self.fence.is_enabled() and not self.fence.contains_pet(
+            x, y, width, height
+        )
+        x, y = self.fence.nearest_inside_position(x, y, width, height)
         self.sync_geometry(x, y, width, height)
-        self.behavior.postpone(2.5)
+        if was_outside:
+            self._log_fence("fence_drag_released_outside")
+            self._log_fence("fence_snapback_target", x=x, y=y)
+            self.position_requested.emit(x, y)
+        else:
+            self._log_fence("fence_drag_released_inside")
+        previous_facing = self.direction.facing_right
+        facing_right = self.direction.update_direction(drag_dx)
+        if facing_right != previous_facing:
+            self.facing_changed.emit(facing_right)
+        self.behavior.postpone(0.3 if was_outside else 2.5)
+        if was_outside and self.fence.should_complain():
+            self._emit_fence_feedback("fence_snapback", "shy")
+            return
+        if was_outside:
+            self._log_fence("fence_complain_suppressed_by_cooldown")
+            return
         if drag_dx > 30:
             self._play_action("dizzy-right", force=True)
         else:
@@ -183,11 +437,15 @@ class PetController(QObject):
         """Play a local head-pat reaction without spending an API request."""
         self.movement.stop()
         self._broadcast("on_headpat")
+        self.emotion_state.apply_event("headpat")
+        self.emotion_changed.emit(self.emotion_state.get_dominant_emotion())
         self._play_action("headpat")
 
     def on_facepoke(self) -> None:
         self.movement.stop()
         self._broadcast("on_facepoke")
+        self.emotion_state.apply_event("facepoke")
+        self.emotion_changed.emit(self.emotion_state.get_dominant_emotion())
         self._play_action("facepoke")
 
     def _play_action(self, name: str, force: bool = False) -> bool:
@@ -229,62 +487,106 @@ class PetController(QObject):
                 animation="waiting",
             )
 
-    def submit_text(self, message: str) -> None:
-        message = message.strip()
-        if not message or self._busy:
+    def submit_text(self, message: str, proactive: bool = False) -> None:
+        if getattr(self, "_shutting_down", False):
             return
-        self._busy = True
-        self._pending_message = message
-        self._pending_source = self.ai_router.classify(message)
-        self._pending_reaction = (
+        if not proactive and detect_vision_scope(message) is VisionScope.SELECTED_REGION:
+            if not self.ai_session.busy:
+                self.local_message_requested.emit("好，你框一下要我看的地方就行。")
+                self.region_selection_requested.emit(message)
+            return
+        self.ai_session.submit(message, proactive)
+
+    def complete_region_selection(self, message: str,
+                                  rect: tuple[int, int, int, int]) -> None:
+        if getattr(self, "_shutting_down", False):
+            return
+        self._selected_region_rect = rect
+        self.ai_session.submit(message, False)
+
+    def cancel_region_selection(self) -> None:
+        if getattr(self, "_shutting_down", False):
+            return
+        self._selected_region_rect = None
+        self.local_message_requested.emit("好，那这次我就不看屏幕啦。")
+
+    def _prepare_ai_request(self, message: str, proactive: bool) -> tuple[list[dict[str, Any]], str | None]:
+        # Intent routing performs an API request. Keep it inside the worker's
+        # normal BrainRouter flow instead of blocking the Qt event loop here
+        # (and routing the same message a second time in ask_stream()).
+        pending_reaction = (
             self.action_registry.match_message(message) if self.action_registry else None
         )
-        self.stream_started.emit({"source": self._pending_source})
+        self.stream_started.emit({"source": "chat"})
+        self.emotion_state.apply_event("ai_thinking")
+        self.emotion_changed.emit("thinking")
         self.movement.stop()
-        self.set_state(PetState.THINKING, BehaviorPriority.AI_TALKING, 400, force=True)
+        target_state = PetState.REMINDING if proactive else PetState.THINKING
+        target_priority = BehaviorPriority.PROACTIVE if proactive else BehaviorPriority.AI_TALKING
+        self.set_state(target_state, target_priority, 400, force=True,
+                       animation="happy" if proactive else None)
         context = self.memory.get_recent()
-        future = self._executor.submit(self._run_stream_request, message, context)
-        future.add_done_callback(self._finish_request)
-
-    def _run_stream_request(self, message: str, context: list[dict[str, Any]]) -> dict[str, str]:
-        return self.ai_router.ask_stream(
-            message,
-            context,
-            lambda delta: self._stream_delta_ready.emit(delta),
-        )
+        if self._selected_region_rect is not None:
+            context.append({"vision_selected_rect": self._selected_region_rect,
+                            "event_type": "internal"})
+            self._selected_region_rect = None
+        if re.search(r"(?:搜|搜索|查).*(?:剪贴板|刚复制)", message, re.I):
+            try:
+                from PyQt6.QtWidgets import QApplication
+                clipboard = QApplication.clipboard()
+                clipboard_text = clipboard.text().strip() if clipboard else ""
+                if clipboard_text:
+                    context.append({"clipboard": clipboard_text, "event_type": "internal"})
+            except Exception:
+                self.logger.debug("Clipboard text unavailable for explicit search", exc_info=True)
+        memory_context = self.memory.prompt_context() if hasattr(self.memory, "prompt_context") else ""
+        if memory_context:
+            context.append({"memory": memory_context})
+        self._refresh_attention()
+        attention_context = self.attention_manager.context_for(message)
+        if attention_context:
+            context.append(attention_context)
+        return context, pending_reaction
 
     def _handle_stream_delta(self, delta: str) -> None:
-        self.message_delta.emit(delta)
+        self.ai_session.handle_stream_delta(delta)
 
-    def _finish_request(self, future: Any) -> None:
-        try:
-            self._result_ready.emit(future.result())
-        except Exception as exc:
-            self.logger.exception("AI request failed")
-            self._result_ready.emit({"error": str(exc)})
+    def _present_stream_text(self, fragment: str) -> None:
+        self.ai_session.present_stream_text(fragment)
+
+    def _show_stream_fragment(self, fragment: str) -> None:
+        if self.state != PetState.TALKING:
+            self.set_state(
+                PetState.TALKING,
+                BehaviorPriority.AI_TALKING,
+                force=True,
+                animation="talking",
+            )
+            self.emotion_changed.emit("speaking")
+        self.message_delta.emit(fragment)
+
+    def _poll_request(self) -> None:
+        self.ai_session.poll_future()
 
     def _handle_result(self, result: dict[str, Any]) -> None:
-        self._busy = False
-        if "error" in result:
-            error_message = str(result["error"])
-            result = {
-                "text": "唔，脑内频道暂时断线了，请稍后再试。",
-                "emotion": "sad",
-                "action": "talk",
-                "state": "talking",
-                "source": self._pending_source,
-            }
-            self.request_failed.emit(error_message)
+        self.ai_session.handle_result(result)
 
-        response = {
-            "text": str(result.get("text", "Maidie 在这里哦。")),
-            "emotion": str(result.get("emotion", "idle")),
-            "action": str(result.get("action", "talk")),
-            "state": str(result.get("state", "talking")),
-            "source": str(result.get("source", "chat")),
-        }
-        if self._pending_reaction:
-            animation = self._pending_reaction
+    def _on_ai_result(self, response: dict[str, str], failed: bool,
+                      error_message: str | None) -> None:
+        if failed and error_message is not None:
+            self.request_failed.emit(error_message)
+            self.emotion_state.apply_event("tool_failure")
+        if not failed:
+            event = "tool_success" if response["source"] not in {"chat", "codex"} else "ai_reply"
+            self.emotion_state.apply_event(event, response["emotion"])
+
+    def _complete_stream_response(self) -> None:
+        self.ai_session.complete_stream_response()
+
+    def _on_ai_response_completed(self, message: str, response: dict[str, str],
+                                  pending_reaction: str | None) -> None:
+        if pending_reaction:
+            animation = pending_reaction
         elif response["source"] == "codex":
             animation = "review"
         elif response["emotion"] in ("happy", "excited"):
@@ -292,15 +594,78 @@ class PetController(QObject):
         elif response["emotion"] == "sad":
             animation = "failed"
         else:
-            animation = "talking"
+            animation = "idle"
         duration = min(9000, max(2800, len(response["text"]) * 90))
-        self._activate_talking(animation, duration)
+        self.emotion_changed.emit(response["emotion"])
+        if animation == "idle":
+            self.set_state(PetState.IDLE, BehaviorPriority.IDLE, force=True)
+        else:
+            final_state = PetState.THINKING if response["source"] == "codex" else PetState.REACTING
+            self.set_state(
+                final_state,
+                BehaviorPriority.AI_TALKING,
+                850,
+                force=True,
+                animation=animation,
+            )
+            token = self._state_token
+            QTimer.singleShot(900, lambda: self._recover_if_current(token))
         self.message_received.emit(response)
-        self.memory.save(self._pending_message, response["text"])
+        internal_event = bool(self.ai_session.pending_proactive)
+        if not internal_event:
+            self.memory.save(message, response["text"])
+        should_extract = self._should_extract_memory(message, response)
+        if (
+            should_extract and not internal_event
+            and hasattr(self.memory, "save_extracted")
+            and hasattr(self.ai_router, "extract_memories")
+            and (
+                not hasattr(self.memory, "can_extract")
+                or self.memory.can_extract(message, response["text"])
+            )
+        ):
+            self._memory_executor.submit(
+                self._extract_and_store_memories,
+                message,
+                response["text"],
+            )
+        elif not should_extract:
+            try:
+                self.logger.debug("performance memory_extraction_skipped=true request_id=%s",
+                                  self.ai_session.request_id)
+            except Exception:
+                pass
         self._broadcast("on_message", response)
-        self._pending_reaction = None
+
+    @staticmethod
+    def _should_extract_memory(message: str, response: dict[str, str]) -> bool:
+        text = message.strip()
+        if is_simple_time_query(text) or is_weather_query(text):
+            return False
+        if re.fullmatch(r"(?:你好|嗨|hello|hi|嗯|好的)[！!。.？?\s]*", text, re.I):
+            return False
+        if response.get("source") in {"tool", "screen"}:
+            return False
+        return True
+
+    def _extract_and_store_memories(self, message: str, response: str) -> None:
+        started = monotonic()
+        try:
+            extracted = self.ai_router.extract_memories(message, response)
+            self.memory.save_extracted(extracted)
+        except Exception:
+            self.logger.exception("Memory extraction failed")
+        finally:
+            try:
+                self.logger.debug("performance memory_extraction_duration_ms=%.3f thread_name=%s",
+                                  (monotonic() - started) * 1000,
+                                  threading.current_thread().name)
+            except Exception:
+                pass
 
     def _activate_talking(self, animation: str, duration: int) -> None:
+        if self._shutting_down:
+            return
         if self.action_registry and self.action_registry.get(animation):
             if not self.action_registry.can_trigger(animation):
                 animation = "talking"
@@ -319,12 +684,16 @@ class PetController(QObject):
         QTimer.singleShot(duration, lambda: self._recover_if_current(token))
 
     def _restore_after_interaction(self) -> None:
+        if self._shutting_down:
+            return
         if self._busy:
             self.set_state(PetState.THINKING, BehaviorPriority.AI_TALKING, 300)
         else:
             self._recover_if_current(self._state_token)
 
     def _recover_if_current(self, token: int) -> None:
+        if self._shutting_down:
+            return
         if token != self._state_token:
             return
         motion_state = self.movement.classify_state()
@@ -332,6 +701,8 @@ class PetController(QObject):
         self.set_state(motion_state, priority, force=True)
 
     def on_cursor_moved(self, x: int, y: int) -> None:
+        if self.proactive_runtime:
+            self.proactive_runtime.awareness.mouse_tracker.record(x, y)
         self.cursor = Vec2(float(x), float(y))
         center = Vec2(
             self.movement.position.x + self.movement.window_width / 2,
@@ -368,13 +739,24 @@ class PetController(QObject):
                     QTimer.singleShot(900, lambda: self._recover_if_current(token))
 
     def _tick(self) -> None:
+        if self._shutting_down:
+            return
         now = monotonic()
         dt = now - self._last_tick
         self._last_tick = now
 
+        if self.drag_active:
+            if not self._drag_pause_logged:
+                self._drag_pause_logged = True
+                self._log_fence("movement_paused_for_drag")
+                if self.fence.is_enabled():
+                    self._log_fence("fence_clamp_skipped_during_drag")
+            return
+
+        active_bounds = self.active_bounds()
         if not self._busy and self.state_machine.can_interrupt(BehaviorPriority.AUTONOMOUS):
             intent = self.behavior.decide(
-                self.bounds,
+                active_bounds,
                 (self.movement.window_width, self.movement.window_height),
                 self.cursor,
             )
@@ -397,7 +779,11 @@ class PetController(QObject):
                     self.movement.move_to(intent.target, intent.run)
 
         old_position = Vec2(self.movement.position.x, self.movement.position.y)
-        position = self.movement.tick(dt, self.bounds)
+        position = self.movement.tick(dt, active_bounds)
+        previous_facing = self.direction.facing_right
+        facing_right = self.direction.update_direction(position.x - old_position.x)
+        if facing_right != previous_facing:
+            self.facing_changed.emit(facing_right)
         if position.distance_to(old_position) > 0.01:
             self.position_requested.emit(position.x, position.y)
 
@@ -406,6 +792,96 @@ class PetController(QObject):
             priority = BehaviorPriority.AUTONOMOUS if motion_state != PetState.IDLE else BehaviorPriority.IDLE
             self.set_state(motion_state, priority)
 
+    def _proactive_tick(self) -> None:
+        if self._shutting_down:
+            return
+        if (not self.proactive_runtime or not self.proactive_runtime.engine.enabled
+                or self._busy):
+            return
+        if self._proactive_future is not None and not self._proactive_future.done():
+            return
+        self._proactive_future = self._proactive_executor.submit(self.proactive_runtime.tick)
+        self._proactive_poll_timer.start()
+
+    def _poll_proactive_future(self) -> None:
+        if self._shutting_down:
+            return
+        future = self._proactive_future
+        if future is None or not future.done():
+            return
+        self._proactive_poll_timer.stop()
+        self._proactive_future = None
+        try:
+            result = future.result()
+        except Exception:
+            self.logger.exception("Proactive Agent tick failed")
+            return
+        self._complete_proactive_result(result)
+
+    def _complete_proactive_result(self, result: tuple[dict[str, Any], Any]) -> None:
+        """Apply a worker result from the Qt-thread polling entry point."""
+        if self._shutting_down or self._busy or not self.proactive_runtime:
+            return
+        context, decision = result
+        self.attention_manager.update(context)
+        experience_decision = self.behavior_orchestrator.decide(
+            self.attention_manager.state,
+            self.emotion_state.get_dominant_emotion(),
+            float(context.get("idle_time", 0)),
+            str(context.get("window_title", "")),
+        )
+        if experience_decision:
+            self._broadcast("on_behavior_decision", experience_decision)
+        if decision:
+            self.submit_text(decision.prompt, proactive=True)
+            self._pending_reaction = decision.action
+        elif self.proactive_runtime.engine.enabled and context.get("mouse_state") != "idle":
+            changed = self.set_state(PetState.WATCHING, BehaviorPriority.AUTONOMOUS,
+                                     900, animation="idle")
+            if changed:
+                token = self._state_token
+                QTimer.singleShot(950, lambda: self._recover_if_current(token))
+        elif float(context.get("idle_time", 0)) >= 300:
+            self._play_action("sleepy")
+
+    def _refresh_attention(self) -> None:
+        if self._shutting_down:
+            return
+        """Refresh cheap foreground facts; OCR remains on the existing awareness cadence."""
+        if not self.proactive_runtime:
+            return
+        awareness = self.proactive_runtime.awareness
+        context: dict[str, Any] = {}
+        try:
+            context.update(awareness.window_tracker.snapshot())
+            if awareness.app_tracker:
+                context.update(awareness.app_tracker.snapshot())
+            screen_reader = getattr(awareness, "screen_reader", None)
+            cached = getattr(screen_reader, "_last_result", None)
+            if isinstance(cached, dict):
+                context["screen"] = dict(cached)
+            self.attention_manager.update(context)
+        except Exception:
+            self.logger.exception("Attention refresh failed")
+
     def shutdown(self) -> None:
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        self.logger.info("Shutting down Maidie controller...")
         self._tick_timer.stop()
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        self.logger.info("Stopped pet tick timer")
+        self._proactive_timer.stop()
+        self._proactive_poll_timer.stop()
+        self.logger.info("Stopped proactive timers")
+        self.ai_session.shutdown()
+        self.logger.info("Stopped agent polling timer")
+        if self._proactive_future is not None:
+            cancel = getattr(self._proactive_future, "cancel", None)
+            if callable(cancel):
+                cancel()
+            self._proactive_future = None
+        self._user_executor.shutdown(wait=False, cancel_futures=True)
+        self._proactive_executor.shutdown(wait=False, cancel_futures=True)
+        self._memory_executor.shutdown(wait=False, cancel_futures=True)
+        self.logger.info("Maidie controller shutdown complete")
