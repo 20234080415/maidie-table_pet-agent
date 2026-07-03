@@ -28,6 +28,14 @@ EXPLANATION = re.compile(r"是什么意思|怎么用|有什么作用|解释", re
 GREETING = re.compile(r"^(?:你好|嗨|hello|hi|嗯|好的)[！!。.？?\s]*$", re.I)
 SEARCH = re.compile(r"搜索|搜|继续查|帮我查|查一下|查询|search|look up", re.I)
 COMPLEX_WEATHER = re.compile(r"适合|穿什么|安排|出去玩|建议|推荐|应该", re.I)
+PROJECT_CODING_REQUEST = re.compile(
+    r"分析(?:一下|下|看看)?(?:我(?:的)?|当前|这个)?(?:这个)?项目|"
+    r"(?:帮我)?(?:修|修复|重构|检查|看看).*(?:项目|代码库|仓库)|"
+    r"(?:生成|给我).*(?:patch|补丁)|测试怎么写|功能应该加在哪里|"
+    r"\b(?:analy[sz]e (?:my |the )?(?:project|repo)|fix (?:this )?bug|"
+    r"refactor (?:this )?module|generate (?:a )?patch|test plan)\b",
+    re.I,
+)
 
 
 def is_simple_time_query(text: str) -> bool:
@@ -43,6 +51,16 @@ def is_simple_weather_query(text: str) -> bool:
     return is_weather_query(value) and not bool(COMPLEX_WEATHER.search(value))
 
 
+def is_coding_agent_request(text: str) -> bool:
+    value = str(text).strip()
+    compact = re.sub(r"[\s'’\"`_-]+", "", value).lower()
+    explicitly_calls_cli = (
+        ("opencode" in compact or "codex" in compact)
+        and bool(re.search(r"调用|使用|用一下|让|请|帮我|分析|检查|修复|看看|run|use|ask", value, re.I))
+    )
+    return explicitly_calls_cli or bool(PROJECT_CODING_REQUEST.search(value))
+
+
 def fast_route(text: str) -> dict[str, Any] | None:
     value = str(text).strip()
     scope = detect_vision_scope(value)
@@ -55,6 +73,9 @@ def fast_route(text: str) -> dict[str, Any] | None:
     if AMBIGUOUS_VISION.fullmatch(value):
         return _route("clarification", "ambiguous visual reference", need_screen=False,
                       need_vision=False)
+    if is_coding_agent_request(value):
+        return _route("code_task", "explicit local coding agent request",
+                      task_type="code_task", needs_tools=True)
     if TECHNICAL.search(value) and not re.search(r"屏幕|当前窗口|打开的软件", value) and (
             EXPLANATION.search(value) or re.search(r"怎么修|为什么不执行|怎么重构|帮我看看", value)):
         return _route("code_task", "technical task", task_type="code_task")

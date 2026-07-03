@@ -73,6 +73,15 @@ class LLMRouterScenarioTests(unittest.TestCase):
                      "这个函数怎么重构更好", "帮我解释一下这个 CMakeLists.txt"]:
             self.assert_route(text, "code_task", "code_task")
 
+    def test_explicit_coding_agent_request_bypasses_chat_classification(self):
+        for text in [
+            "你调用open'co'de看看我分析一下我的这个项目",
+            "使用 OpenCode 检查当前项目",
+            "分析一下我的这个项目",
+        ]:
+            route = self.assert_route(text, "code_task", "code_task", True)
+            self.assertEqual(route["route_source"], "fast_rule")
+
     def test_time_delta_negative_examples(self):
         for text in ["我快下课了好开心", "今天时间过得好慢", "我不想上课了",
                      "晚上八点这个说法听起来好怪", "5.40 这个数字是什么意思"]:

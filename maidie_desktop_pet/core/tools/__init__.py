@@ -7,6 +7,8 @@ from core.tools.system_tools import SystemTool
 from core.tools.search_tool import SearchTool
 from core.tools.screen_tool import ScreenTool
 from core.tools.memory_tool import MemoryTool
+from core.tools.coding_agent_tool import CodingAgentTool
+from core.tools.coding_agent_installer import CodingAgentInstaller
 
-__all__ = ["MemoryTool", "ScreenTool", "SearchTool", "SystemTool", "ToolRegistry",
+__all__ = ["CodingAgentInstaller", "CodingAgentTool", "MemoryTool", "ScreenTool", "SearchTool", "SystemTool", "ToolRegistry",
            "TimeTool", "WeatherTool"]

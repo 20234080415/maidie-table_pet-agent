@@ -40,6 +40,15 @@ VISION_DEFAULTS = {
     "cursor_region_height": 800,
 }
 FENCE_DEFAULTS = {"show_overlay": True}
+WORKSPACE_DEFAULTS = {"root": ""}
+CODING_AGENT_DEFAULTS = {
+    "enabled": False,
+    "provider": "opencode",
+    "command": "opencode",
+    "timeout_seconds": 120,
+    "idle_timeout_seconds": 30,
+    "dry_run": True,
+}
 
 
 class ConfigStore:
@@ -64,6 +73,23 @@ class ConfigStore:
             fence = config.setdefault("fence", {})
             for key, value in FENCE_DEFAULTS.items():
                 fence.setdefault(key, value)
+            workspace = config.setdefault("workspace", {})
+            for key, value in WORKSPACE_DEFAULTS.items():
+                workspace.setdefault(key, value)
+            coding_agent = config.setdefault("coding_agent", {})
+            for key, value in CODING_AGENT_DEFAULTS.items():
+                coding_agent.setdefault(key, value)
+            provider = str(coding_agent.get("provider") or "opencode").strip().lower()
+            coding_agent["provider"] = provider if provider in {"opencode", "codex"} else "opencode"
+            coding_agent["command"] = str(
+                coding_agent.get("command") or coding_agent["provider"]
+            ).strip()
+            try:
+                timeout = int(coding_agent.get("timeout_seconds", 120))
+            except (TypeError, ValueError):
+                timeout = 120
+            coding_agent["timeout_seconds"] = max(1, min(600, timeout))
+            coding_agent["dry_run"] = True
             return config
 
     def public_settings(self) -> dict[str, Any]:
@@ -74,6 +100,8 @@ class ConfigStore:
         network = config.get("network", {})
         proactive = config.get("proactive", {})
         vision = config.get("vision", {})
+        workspace = config.get("workspace", {})
+        coding_agent = config.get("coding_agent", {})
         key = str(ai.get("api_key", ""))
         return {
             "provider": ai.get("provider", "deepseek"),
@@ -103,6 +131,13 @@ class ConfigStore:
             "vision_default_scope": str(vision.get("default_scope", "active_window")),
             "vision_cursor_region_width": int(vision.get("cursor_region_width", 1000)),
             "vision_cursor_region_height": int(vision.get("cursor_region_height", 800)),
+            "workspace_root": str(workspace.get("root", "")),
+            "coding_agent_enabled": bool(coding_agent.get("enabled", False)),
+            "coding_agent_provider": str(coding_agent.get("provider", "opencode")),
+            "coding_agent_command": str(coding_agent.get("command", "opencode")),
+            "coding_agent_timeout_seconds": int(coding_agent.get("timeout_seconds", 120)),
+            "coding_agent_idle_timeout_seconds": int(coding_agent.get("idle_timeout_seconds", 30)),
+            "coding_agent_dry_run": True,
         }
 
     def update_user_settings(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -114,6 +149,8 @@ class ConfigStore:
             network = config.setdefault("network", {})
             proactive = config.setdefault("proactive", {})
             vision = config.setdefault("vision", {})
+            workspace = config.setdefault("workspace", {})
+            coding_agent = config.setdefault("coding_agent", {})
             ai["provider"] = str(values.get("provider", ai.get("provider", "deepseek")))
             ai["base_url"] = str(values.get("base_url", ai.get("base_url", ""))).rstrip("/")
             ai["model"] = str(values.get("chat_model", ai.get("model", "")))
@@ -150,6 +187,27 @@ class ConfigStore:
             vision["default_scope"] = default_scope if default_scope in {"active_window", "fullscreen", "cursor_region"} else "active_window"
             vision["cursor_region_width"] = max(200, min(4096, int(values.get("vision_cursor_region_width", vision.get("cursor_region_width", 1000)))))
             vision["cursor_region_height"] = max(200, min(2160, int(values.get("vision_cursor_region_height", vision.get("cursor_region_height", 800)))))
+            workspace["root"] = str(values.get("workspace_root", workspace.get("root", ""))).strip()
+            coding_agent["enabled"] = bool(values.get(
+                "coding_agent_enabled", coding_agent.get("enabled", False)
+            ))
+            provider = str(values.get(
+                "coding_agent_provider", coding_agent.get("provider", "opencode")
+            )).strip().lower()
+            coding_agent["provider"] = provider if provider in {"opencode", "codex"} else "opencode"
+            command = str(values.get(
+                "coding_agent_command", coding_agent.get("command", "opencode")
+            )).strip()
+            coding_agent["command"] = command or coding_agent["provider"]
+            try:
+                timeout = int(values.get(
+                    "coding_agent_timeout_seconds", coding_agent.get("timeout_seconds", 120)
+                ))
+            except (TypeError, ValueError):
+                timeout = 120
+            coding_agent["timeout_seconds"] = max(1, min(600, timeout))
+            # Version one is read-only regardless of UI or caller input.
+            coding_agent["dry_run"] = True
             self._atomic_write(config)
             return deepcopy(config)
 

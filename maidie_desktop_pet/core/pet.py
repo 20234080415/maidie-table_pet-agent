@@ -40,6 +40,7 @@ class PetController(QObject):
     local_message_requested = pyqtSignal(str)
     fence_changed = pyqtSignal(object)
     region_selection_requested = pyqtSignal(str)
+    coding_agent_event = pyqtSignal(object)
 
     def __init__(
         self,
@@ -104,6 +105,27 @@ class PetController(QObject):
         self._tick_timer = QTimer(self)
         self._tick_timer.timeout.connect(self._tick)
         self._tick_timer.start(16)
+        self._wire_coding_agent()
+
+    def _wire_coding_agent(self) -> None:
+        executor = getattr(self.ai_router, "executor", None)
+        registry = getattr(executor, "tool_registry", None)
+        tool = registry.get("coding_agent") if registry is not None else None
+        if tool is None or not hasattr(tool, "set_progress_callbacks"):
+            return
+        tool.set_progress_callbacks(
+            on_start=lambda payload: self.coding_agent_event.emit({"event": "start", **payload}),
+            on_output_line=lambda payload: self.coding_agent_event.emit({"event": "output", **payload}),
+            on_status_change=lambda payload: self.coding_agent_event.emit({"event": "status", **payload}),
+            on_finish=lambda payload: self.coding_agent_event.emit({"event": "finish", **payload}),
+        )
+
+    def cancel_coding_agent(self) -> None:
+        executor = getattr(self.ai_router, "executor", None)
+        registry = getattr(executor, "tool_registry", None)
+        tool = registry.get("coding_agent") if registry is not None else None
+        if tool is not None and hasattr(tool, "cancel"):
+            tool.cancel()
 
     @property
     def state(self) -> PetState:
@@ -236,6 +258,9 @@ class PetController(QObject):
         vision_service = getattr(screen_tool, "vision_service", None)
         if vision_service is not None and hasattr(vision_service, "reconfigure"):
             vision_service.reconfigure(config.get("vision", {}))
+        coding_tool = self.ai_router.executor.tool_registry.get("coding_agent")
+        if coding_tool is not None and hasattr(coding_tool, "configure"):
+            coding_tool.configure(config.get("workspace", {}), config.get("coding_agent", {}))
         public = self.config_store.public_settings()
         self.settings_changed.emit(public)
         self._broadcast("on_settings_changed", public)
@@ -868,6 +893,7 @@ class PetController(QObject):
         if self._shutting_down:
             return
         self._shutting_down = True
+        self.cancel_coding_agent()
         self.logger.info("Shutting down Maidie controller...")
         self._tick_timer.stop()
         self.logger.info("Stopped pet tick timer")

@@ -4,7 +4,7 @@ import logging
 import re
 from typing import Any
 
-from core.brain.fast_route import is_simple_time_query, is_weather_query
+from core.brain.fast_route import is_coding_agent_request, is_simple_time_query, is_weather_query
 from core.brain.search_query import SearchQueryResolver
 
 
@@ -15,6 +15,13 @@ class BrainPlanner:
     TECHNICAL_LOOKUP = re.compile(
         r"查|搜索|资料|文档|官网|是什么|什么意思|有哪些|作用|怎么用|如何(?:使用|配置)|"
         r"\b(?:search|look up|docs?|documentation|what is|what does|how (?:to|do))\b",
+        re.I,
+    )
+    CODING_AGENT_REQUEST = re.compile(
+        r"分析(?:一下)?我的项目|帮我修(?:一下)?这个\s*bug|这个模块怎么重构|"
+        r"帮我生成\s*patch|帮我看看测试怎么写|这个功能应该加在哪里|"
+        r"\b(?:analy[sz]e (?:my |the )?project|fix (?:this )?bug|refactor (?:this )?module|"
+        r"generate (?:a )?patch|test plan)\b",
         re.I,
     )
 
@@ -111,6 +118,13 @@ class BrainPlanner:
     @staticmethod
     def code_plan(user_input: str) -> dict[str, Any]:
         text = str(user_input).strip()
+        if is_coding_agent_request(text) or BrainPlanner.CODING_AGENT_REQUEST.search(text):
+            operation = BrainPlanner._coding_operation(text)
+            return {"goal": text, "steps": [
+                BrainPlanner._step("coding_agent", "只读分析本地代码工作区", {
+                    "query": text, "operation": operation,
+                })
+            ]}
         if BrainPlanner.TECHNICAL_LOOKUP.search(text):
             query = f"{text} official documentation"
             return {"goal": text, "steps": [
@@ -119,6 +133,18 @@ class BrainPlanner:
         return {"goal": text, "steps": [
             BrainPlanner._step("codex", "分析代码任务并给出可执行修复资料", {"query": text})
         ]}
+
+    @staticmethod
+    def _coding_operation(text: str) -> str:
+        if re.search(r"patch|补丁", text, re.I):
+            return "propose_patch"
+        if re.search(r"测试|test plan", text, re.I):
+            return "test_plan"
+        if re.search(r"修.*bug|fix .*bug", text, re.I):
+            return "propose_fix"
+        if re.search(r"模块|重构|加在哪里|module|refactor", text, re.I):
+            return "explain_module"
+        return "analyze_project"
 
     @staticmethod
     def system_plan(user_input: str) -> dict[str, Any]:

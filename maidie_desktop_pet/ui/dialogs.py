@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import html
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QLabel,
     QLineEdit,
+    QHBoxLayout,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -21,6 +24,8 @@ from PyQt6.QtWidgets import (
 )
 
 from core.settings import PERSONALITY_PRESETS
+from core.tools.coding_agent_tool import CodingAgentTool
+from core.tools.coding_agent_installer import CodingAgentInstaller
 
 
 BASE_STYLE = """
@@ -74,6 +79,19 @@ QTabBar::tab:selected { background: #eadadd; color: #3f2d34; }
 """
 
 
+class _OpenCodeInstallWorker(QObject):
+    finished = pyqtSignal(dict)
+
+    def __init__(self, installer: CodingAgentInstaller, method: str) -> None:
+        super().__init__()
+        self.installer = installer
+        self.method = method
+
+    @pyqtSlot()
+    def run(self) -> None:
+        self.finished.emit(self.installer.install_opencode(self.method))
+
+
 class RecentChatsDialog(QDialog):
     def __init__(self, controller, parent=None):
         super().__init__(parent)
@@ -118,6 +136,9 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.controller = controller
         self.settings = controller.settings_snapshot()
+        self.coding_agent_installer = CodingAgentInstaller(timeout_seconds=300)
+        self._install_thread: QThread | None = None
+        self._install_worker: _OpenCodeInstallWorker | None = None
         self.setWindowTitle("Maidie 设置")
         self.resize(720, 540)
         self.setStyleSheet(BASE_STYLE)
@@ -127,6 +148,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self._build_model_tab(), "模型与 API")
         self.tabs.addTab(self._build_network_tab(), "联网查询")
         self.tabs.addTab(self._build_vision_tab(), "千问视觉")
+        self.tabs.addTab(self._build_coding_agent_tab(), "工作区 / Coding Agent")
         self.tabs.addTab(self._build_proactive_tab(), "主动行为")
         if initial_tab:
             for index in range(self.tabs.count()):
@@ -262,6 +284,244 @@ class SettingsDialog(QDialog):
         layout.addRow("", note)
         return page
 
+    def _build_coding_agent_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QFormLayout(page)
+        self.workspace_root = QLineEdit(self.settings.get("workspace_root", ""))
+        self.workspace_root.setPlaceholderText("选择允许 Coding Agent 读取的项目目录")
+        choose_button = QPushButton("选择项目目录")
+        choose_button.setObjectName("chooseWorkspaceButton")
+        choose_button.clicked.connect(self._choose_workspace)
+        workspace_row = QWidget()
+        workspace_layout = QHBoxLayout(workspace_row)
+        workspace_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_layout.addWidget(self.workspace_root, 1)
+        workspace_layout.addWidget(choose_button)
+
+        self.coding_agent_enabled = QCheckBox("启用本机只读 Coding Agent")
+        self.coding_agent_enabled.setChecked(
+            self.settings.get("coding_agent_enabled", False)
+        )
+        self.coding_agent_provider = QComboBox()
+        self.coding_agent_provider.addItem("OpenCode", "opencode")
+        self.coding_agent_provider.addItem("Codex", "codex")
+        provider_index = self.coding_agent_provider.findData(
+            self.settings.get("coding_agent_provider", "opencode")
+        )
+        self.coding_agent_provider.setCurrentIndex(max(0, provider_index))
+        self.coding_agent_command = QLineEdit(
+            self.settings.get("coding_agent_command", "opencode")
+        )
+        self.coding_agent_command.setPlaceholderText("例如 opencode、codex 或可执行文件完整路径")
+        self.coding_agent_timeout = QSpinBox()
+        self.coding_agent_timeout.setRange(1, 600)
+        self.coding_agent_timeout.setSuffix(" 秒")
+        self.coding_agent_timeout.setValue(
+            self.settings.get("coding_agent_timeout_seconds", 120)
+        )
+        self.coding_agent_dry_run = QCheckBox("强制只读分析（dry-run）")
+        self.coding_agent_dry_run.setChecked(True)
+        self.coding_agent_dry_run.setEnabled(False)
+        test_button = QPushButton("测试 Coding Agent")
+        test_button.setObjectName("testCodingAgentButton")
+        test_button.clicked.connect(self._test_coding_agent)
+        self.coding_agent_test_result = QLabel("尚未测试")
+        self.coding_agent_test_result.setObjectName("codingAgentTestResult")
+        self.coding_agent_test_result.setWordWrap(True)
+        self.install_method = QComboBox()
+        self.install_method.setObjectName("openCodeInstallMethod")
+        self.detect_opencode_button = QPushButton("检测 OpenCode")
+        self.detect_opencode_button.clicked.connect(self._detect_opencode)
+        self.install_opencode_button = QPushButton("安装 OpenCode")
+        self.install_opencode_button.clicked.connect(self._install_opencode)
+        self.redetect_opencode_button = QPushButton("重新检测")
+        self.redetect_opencode_button.clicked.connect(self._detect_opencode)
+        install_buttons = QWidget()
+        install_buttons_layout = QHBoxLayout(install_buttons)
+        install_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        install_buttons_layout.addWidget(self.detect_opencode_button)
+        install_buttons_layout.addWidget(self.install_opencode_button)
+        install_buttons_layout.addWidget(self.redetect_opencode_button)
+        self.install_log = QTextEdit()
+        self.install_log.setObjectName("openCodeInstallLog")
+        self.install_log.setReadOnly(True)
+        self.install_log.setPlaceholderText("检测和安装结果会显示在这里。")
+        self.install_log.setMaximumHeight(120)
+        self.opencode_setup_status = QLabel()
+        self.opencode_setup_status.setWordWrap(True)
+        open_config = QPushButton("打开 OpenCode 配置")
+        open_config.clicked.connect(lambda: self._open_opencode_terminal("connect"))
+        open_init = QPushButton("打开 OpenCode 初始化")
+        open_init.clicked.connect(lambda: self._open_opencode_terminal("init"))
+        readonly_test = QPushButton("只读联调测试")
+        readonly_test.clicked.connect(self._run_readonly_coding_test)
+        setup_buttons = QWidget(); setup_layout = QHBoxLayout(setup_buttons)
+        setup_layout.setContentsMargins(0, 0, 0, 0)
+        setup_layout.addWidget(open_config); setup_layout.addWidget(open_init); setup_layout.addWidget(readonly_test)
+        note = QLabel(
+            "测试只检查目录、provider 和命令是否可用，不会启动 Agent。第一版始终禁止写文件、"
+            "shell、依赖安装、commit 和 push。"
+        )
+        note.setWordWrap(True)
+        layout.addRow("项目工作区", workspace_row)
+        layout.addRow("启用", self.coding_agent_enabled)
+        layout.addRow("Provider", self.coding_agent_provider)
+        layout.addRow("Command", self.coding_agent_command)
+        layout.addRow("超时", self.coding_agent_timeout)
+        layout.addRow("运行模式", self.coding_agent_dry_run)
+        layout.addRow("", test_button)
+        layout.addRow("测试结果", self.coding_agent_test_result)
+        layout.addRow("安装方式", self.install_method)
+        layout.addRow("OpenCode", install_buttons)
+        layout.addRow("安装日志", self.install_log)
+        layout.addRow("初始化状态", self.opencode_setup_status)
+        layout.addRow("", setup_buttons)
+        layout.addRow("", note)
+        self._refresh_install_methods(write_log=False)
+        self._refresh_setup_status()
+        return page
+
+    def _choose_workspace(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self, "选择项目目录", self.workspace_root.text().strip()
+        )
+        if selected:
+            self.workspace_root.setText(selected)
+            self.coding_agent_test_result.setText("尚未测试")
+
+    def _test_coding_agent(self) -> None:
+        result = CodingAgentTool.validate_configuration(
+            self.workspace_root.text(),
+            str(self.coding_agent_provider.currentData() or ""),
+            self.coding_agent_command.text(),
+            self.coding_agent_dry_run.isChecked(),
+        )
+        self.coding_agent_test_result.setText(str(result["message"]))
+        color = "#317a45" if result["ok"] else "#a33d52"
+        self.coding_agent_test_result.setStyleSheet(f"color: {color}; font-weight: 600;")
+
+    def _refresh_install_methods(self, write_log: bool = True) -> dict[str, str]:
+        methods = self.coding_agent_installer.detect_install_methods()
+        previous = self.install_method.currentData()
+        self.install_method.clear()
+        labels = {"npm": "npm（推荐）", "scoop": "Scoop", "choco": "Chocolatey"}
+        for method, executable in methods.items():
+            self.install_method.addItem(labels[method], method)
+            self.install_method.setItemData(self.install_method.count() - 1, executable,
+                                            Qt.ItemDataRole.ToolTipRole)
+        previous_index = self.install_method.findData(previous)
+        self.install_method.setCurrentIndex(max(0, previous_index))
+        self.install_opencode_button.setEnabled(bool(methods) and self._install_thread is None)
+        if write_log:
+            if methods:
+                names = "、".join(labels[name] for name in methods)
+                self.install_log.append(f"检测到安装方式：{names}")
+            else:
+                self.install_log.append("未检测到 npm、Scoop 或 Chocolatey。")
+                self.install_log.append("请先安装 Node.js、Scoop 或 Chocolatey 后重试。")
+                self.install_log.append("Maidie 不会自动安装这些前置环境。")
+        return methods
+
+    def _detect_opencode(self) -> None:
+        executable = self.coding_agent_installer.detect_opencode()
+        if executable:
+            self.install_log.append(f"OpenCode 可用：{executable}")
+            self.coding_agent_test_result.setText("可用")
+        else:
+            self.install_log.append("未检测到 OpenCode。")
+        self._refresh_install_methods()
+        self._refresh_setup_status()
+
+    def _refresh_setup_status(self) -> dict:
+        status = self.coding_agent_installer.detect_setup_status(self.workspace_root.text())
+        parts = ["OpenCode：" + ("已安装" if status["installed"] else "未安装"),
+                 "模型配置：" + ("疑似已配置" if status["provider_config_detected"] else "未检测到配置，建议执行 /connect"),
+                 "AGENTS.md：" + ("项目上下文已初始化" if status["agents_md"] else "未检测到，建议执行 /init")]
+        self.opencode_setup_status.setText("\n".join(parts))
+        return status
+
+    def _open_opencode_terminal(self, mode: str) -> None:
+        instruction = "/connect 配置模型 provider / API Key" if mode == "connect" else "/init 生成 AGENTS.md"
+        QMessageBox.information(self, "OpenCode 可见终端", f"终端打开后，请在 OpenCode 中执行 {instruction}。\nMaidie 不会读取或保存 API Key。")
+        result = self.coding_agent_installer.open_visible_terminal(self.workspace_root.text())
+        if not result.get("ok"):
+            self.install_log.append(str(result.get("error") or "无法打开 OpenCode"))
+
+    def _run_readonly_coding_test(self) -> None:
+        if not self.workspace_root.text().strip():
+            self.install_log.append("只读联调失败：workspace 未配置")
+            return
+        if not self.coding_agent_enabled.isChecked():
+            self.install_log.append("只读联调失败：Coding Agent 未启用")
+            return
+        self.coding_agent_dry_run.setChecked(True)
+        self.controller.submit_text("用 OpenCode 对当前项目执行只读 test plan，不修改文件，不执行 shell，不提交代码")
+
+    def _install_opencode(self) -> None:
+        methods = self._refresh_install_methods(write_log=False)
+        method = str(self.install_method.currentData() or "")
+        if not methods or method not in methods:
+            self._refresh_install_methods(write_log=True)
+            return
+        message = (
+            "将安装第三方 CLI 工具 OpenCode。\n\n"
+            "• 将从网络下载内容\n"
+            "• 安装过程可能需要一段时间\n"
+            "• OpenCode 仍需要你自行配置模型 API Key\n"
+            "• Maidie 不会修改项目文件\n\n"
+            f"安装方式：{method}"
+        )
+        answer = QMessageBox.question(
+            self, "确认安装 OpenCode", message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.install_log.append("用户已取消安装，未执行任何命令。")
+            return
+        self.install_log.append(f"开始通过 {method} 安装 OpenCode……")
+        self._set_install_controls_enabled(False)
+        thread = QThread(self)
+        worker = _OpenCodeInstallWorker(self.coding_agent_installer, method)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_install_finished)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._clear_install_thread)
+        self._install_thread = thread
+        self._install_worker = worker
+        thread.start()
+
+    def _on_install_finished(self, result: dict) -> None:
+        stdout = str(result.get("stdout") or "").strip()
+        stderr = str(result.get("stderr") or "").strip()
+        if stdout:
+            self.install_log.append(stdout)
+        if stderr:
+            self.install_log.append(stderr)
+        if result.get("success"):
+            self.install_log.append("OpenCode 安装成功，重新检测已通过。")
+            provider_index = self.coding_agent_provider.findData("opencode")
+            self.coding_agent_provider.setCurrentIndex(max(0, provider_index))
+            self.coding_agent_command.setText("opencode")
+            self.coding_agent_dry_run.setChecked(True)
+            self.coding_agent_test_result.setText("可用")
+        else:
+            self.install_log.append(f"OpenCode 安装失败：{result.get('error') or '未知错误'}")
+
+    def _clear_install_thread(self) -> None:
+        self._install_thread = None
+        self._install_worker = None
+        self._set_install_controls_enabled(True)
+        self._refresh_install_methods(write_log=False)
+
+    def _set_install_controls_enabled(self, enabled: bool) -> None:
+        self.detect_opencode_button.setEnabled(enabled)
+        self.redetect_opencode_button.setEnabled(enabled)
+        self.install_method.setEnabled(enabled)
+        self.install_opencode_button.setEnabled(enabled)
+
     def _build_vision_tab(self) -> QWidget:
         page = QWidget()
         layout = QFormLayout(page)
@@ -343,6 +603,9 @@ class SettingsDialog(QDialog):
         return page
 
     def _save(self) -> None:
+        if self._install_thread is not None:
+            QMessageBox.information(self, "OpenCode 正在安装", "请等待安装完成后再保存设置。")
+            return
         values = {
             "provider": self.provider.currentData(),
             "base_url": self.base_url.text().strip(),
@@ -371,8 +634,26 @@ class SettingsDialog(QDialog):
             "vision_default_scope": self.vision_default_scope.currentData(),
             "vision_cursor_region_width": self.vision_cursor_width.value(),
             "vision_cursor_region_height": self.vision_cursor_height.value(),
+            "workspace_root": self.workspace_root.text().strip(),
+            "coding_agent_enabled": self.coding_agent_enabled.isChecked(),
+            "coding_agent_provider": self.coding_agent_provider.currentData(),
+            "coding_agent_command": self.coding_agent_command.text().strip(),
+            "coding_agent_timeout_seconds": self.coding_agent_timeout.value(),
+            "coding_agent_dry_run": True,
         }
         if not values["base_url"] or not values["chat_model"] or not values["technical_model"]:
             return
         self.controller.apply_settings(values)
         self.accept()
+
+    def reject(self) -> None:
+        if self._install_thread is not None:
+            QMessageBox.information(self, "OpenCode 正在安装", "请等待安装完成后再关闭设置。")
+            return
+        super().reject()
+
+    def closeEvent(self, event) -> None:
+        if self._install_thread is not None:
+            event.ignore()
+            return
+        super().closeEvent(event)

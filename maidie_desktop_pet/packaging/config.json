@@ -53,5 +53,16 @@
   "vision": {
     "enabled": false,
     "interval_seconds": 60
+  },
+  "workspace": {
+    "root": ""
+  },
+  "coding_agent": {
+    "enabled": false,
+    "provider": "opencode",
+    "command": "opencode",
+    "timeout_seconds": 120,
+    "idle_timeout_seconds": 30,
+    "dry_run": true
   }
 }

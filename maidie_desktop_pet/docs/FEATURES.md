@@ -47,8 +47,23 @@
 | `ScreenTool` | 按指定范围取得结构化屏幕事实 |
 | `MemoryTool` | 查询本地近期对话、事实与偏好 |
 | `SystemTool` | 受控文件读取、搜索和需确认的有限操作 |
+| `CodingAgentTool` | 在配置的工作区内调用本机 OpenCode/Codex 做只读代码分析 |
 
 工具只提供事实，最终文本由 Synthesizer 生成。
+
+## 本地 Coding Agent（实验性）
+
+该能力默认关闭。启用并配置 `workspace.root` 后，可处理项目分析、模块解释、修复建议、patch 预览和测试方案。第一版严格为 dry-run：不会写入或删除文件，不会安装依赖、执行任意 shell、提交或推送 Git。
+
+OpenCode/Codex 的输出先转换为 `summary`、`findings`、`suggested_changes`、`patch_preview` 和 `tests_suggested` 等结构化事实，再由 Synthesizer 组织回复。CLI 缺失、路径未配置或执行超时都会返回明确错误。
+
+“设置 → 工作区 / Coding Agent”提供项目目录选择、启用开关、provider、command、超时和强制 dry-run 状态。配置测试会明确显示可用、workspace 未配置、command 不可用、provider 不支持或配置异常；测试本身不会启动 coding agent。
+
+同一页面提供“检测 OpenCode”“安装 OpenCode”和“重新检测”。安装前必须由用户确认，过程在后台执行并显示 stdout/stderr；可使用已有的 npm、Scoop 或 Chocolatey，但不会代替用户安装这些前置环境，也不会自动配置 OpenCode 的模型凭据。
+
+Coding Agent 属于长任务。运行时会弹出独立的小终端工作台，实时显示 stdout/stderr、状态、耗时和最近输出时间；用户可取消、清空或复制最近 200 行日志。总超时或 30 秒无输出会终止完整进程树。
+
+OpenCode 模型连接必须由用户在可见终端中执行 `/connect`；项目上下文可执行 `/init` 生成 `AGENTS.md`。Maidie 只检测配置文件和 `AGENTS.md` 是否存在，不读取或保存 API Key。
 
 ## 时间与倒计时
 

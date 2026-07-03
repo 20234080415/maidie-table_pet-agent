@@ -11,6 +11,7 @@ class BrainExecutor:
 
     ALLOWED_TOOLS = {
         "weather", "time", "search", "screen", "memory", "system", "codex", "opencode",
+        "coding_agent",
     }
 
     def __init__(self, tool_registry: Any) -> None:
@@ -104,6 +105,12 @@ class BrainExecutor:
                     selected_rect=(tuple(safe_params["selected_rect"])
                                    if isinstance(safe_params.get("selected_rect"), (list, tuple))
                                    and len(safe_params["selected_rect"]) == 4 else None),
+                )
+            if name == "coding_agent":
+                return tool.run(
+                    user_input,
+                    operation=str(safe_params.get("operation") or "analyze_project"),
+                    target_path=str(safe_params.get("target_path") or ""),
                 )
             if name == "time" and hasattr(tool, "execute"):
                 return tool.execute(

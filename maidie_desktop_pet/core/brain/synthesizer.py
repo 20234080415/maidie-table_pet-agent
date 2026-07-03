@@ -43,6 +43,9 @@ class Synthesizer:
                           for item in tool_data)):
             mark(local_response_used=True)
             normalized = self._local_fallback(source, tool_data)
+        elif any(item.get("tool") == "coding_agent" for item in tool_data):
+            mark(local_response_used=True)
+            normalized = self._local_fallback(source, tool_data)
         elif self.should_use_local_tool_response(user_input, tool_data):
             mark(local_response_used=True)
             normalized = self._local_fallback(source, tool_data)
@@ -90,11 +93,30 @@ class Synthesizer:
                                   if item.get("tool") == "search"), {})
             failed_screen = next((item.get("data", {}).get("raw", {}) for item in tool_data
                                   if item.get("tool") == "screen"), {})
+            failed_coding = next((item.get("data", {}).get("raw", {}) for item in tool_data
+                                  if item.get("tool") == "coding_agent"), {})
             reason = str(failed_search.get("failure_reason", ""))
             query = str(failed_search.get("query", ""))
             code = str(failed_screen.get("error_code", ""))
             detail = str(failed_screen.get("error", ""))
-            if reason == "EMPTY_QUERY":
+            coding_code = str(failed_coding.get("error_code", ""))
+            if coding_code == "workspace_not_configured":
+                text = "还没有配置代码工作区，请先设置 workspace.root。"
+            elif coding_code == "disabled":
+                text = "本地 Coding Agent 目前未启用，请先在配置中开启。"
+            elif coding_code == "cli_not_found":
+                text = "没有找到可用的 OpenCode/Codex，请检查是否已安装以及 command 路径。"
+            elif coding_code == "timeout":
+                text = "Coding Agent 超时，已终止进程树。可以缩小分析范围后再试。"
+            elif coding_code == "idle_timeout":
+                text = "Coding Agent 长时间没有输出，可能正在等待 OpenCode 配置。请在设置页打开 OpenCode 配置，并在可见终端中完成 /connect。"
+            elif coding_code == "needs_setup":
+                text = "OpenCode 还需要配置模型 provider / API Key。请在设置页打开 OpenCode 配置，并在终端中执行 /connect。"
+            elif coding_code == "cancelled":
+                text = "这次 Coding Agent 任务已经取消，相关进程也已清理。"
+            elif failed_coding:
+                text = str(failed_coding.get("error") or "本地 Coding Agent 暂时不可用。")
+            elif reason == "EMPTY_QUERY":
                 text = "主人想让我搜什么呀？"
             elif reason == "API_KEY_MISSING":
                 text = "搜索功能还没配置好，需要检查 Tavily API Key。"
@@ -154,6 +176,21 @@ class Synthesizer:
                             f"场景为 {raw.get('context', 'unknown')}。")
             elif kind == "search":
                 text = str(raw.get("summary") or raw.get("error") or "暂时没查到可靠资料。")
+            elif kind == "coding_agent":
+                summary = str(raw.get("summary") or "只读分析已完成。")
+                findings = raw.get("findings") if isinstance(raw.get("findings"), list) else []
+                changes = (raw.get("suggested_changes")
+                           if isinstance(raw.get("suggested_changes"), list) else [])
+                tests = (raw.get("tests_suggested")
+                         if isinstance(raw.get("tests_suggested"), list) else [])
+                parts = [summary]
+                if findings:
+                    parts.append("发现：" + "；".join(map(str, findings)))
+                if changes:
+                    parts.append("建议：" + "；".join(map(str, changes)))
+                if tests:
+                    parts.append("测试建议：" + "；".join(map(str, tests)))
+                text = "\n".join(parts)
             else:
                 text = "我已经记下相关情况啦。"
         return {"text": text, "emotion": "thinking", "action": "talk", "state": "talking",

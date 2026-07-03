@@ -31,7 +31,7 @@ python main.py
 
 ## 基础配置
 
-启动后右键 Maidie，打开“性格与模型设置”，配置聊天模型、技术模型、人格、Tavily 搜索和千问视觉。API Key 会以本地明文写入 `config/config.json`；推荐优先使用环境变量，且绝不能提交真实配置。
+启动后右键 Maidie，打开“设置”，配置聊天模型、技术模型、人格、Tavily 搜索、千问视觉和 Coding Agent。API Key 会以本地明文写入 `config/config.json`；推荐优先使用环境变量，且绝不能提交真实配置。
 
 ## 常用操作
 

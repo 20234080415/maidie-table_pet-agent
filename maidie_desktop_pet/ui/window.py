@@ -16,6 +16,7 @@ from ui.help_dialog import HelpDialog
 from ui.about_dialog import AboutDialog
 from ui.fence_overlay import FenceOverlayWindow
 from ui.resize_handle import SubtleResizeHandle
+from ui.coding_agent_console import CodingAgentConsole
 from ui.sprite import HatchPetSprite
 from core.vision.region_selector import RegionSelector
 
@@ -76,6 +77,7 @@ class PetWindow(QWidget):
         self.bubble_controller = BubbleController(self.bubble, self._position_overlays, self)
         self.character = HatchPetSprite(assets_dir / "spritesheet.webp")
         self.chat_input = ChatInput(self)
+        self.coding_console = CodingAgentConsole(controller.cancel_coding_agent)
         self.chat_input.submitted.connect(controller.submit_text)
         self.resize_handle = SubtleResizeHandle(self)
         self._handle_visibility_timer = QTimer(self)
@@ -96,11 +98,20 @@ class PetWindow(QWidget):
         controller.facing_changed.connect(self.character.set_facing_right)
         controller.fence_changed.connect(self._update_fence_overlay)
         controller.region_selection_requested.connect(self._start_region_selection)
+        controller.coding_agent_event.connect(self._handle_coding_agent_event)
         self.character.set_facing_right(controller.direction.facing_right)
         self.character.set_animation("idle")
         self._move_to_bottom_right()
         self._position_overlays()
         self.resize_handle.raise_()
+
+    def _handle_coding_agent_event(self, event: dict) -> None:
+        self.coding_console.handle_event(event)
+        if event.get("event") == "start":
+            self.character.set_animation("thinking")
+            self._show_local_message("我去叫 OpenCode 看看项目啦，旁边的小终端会显示进度。")
+        elif event.get("event") == "finish":
+            self.character.set_animation("idle")
 
     def _start_region_selection(self, message: str) -> None:
         if self._shutting_down:
@@ -224,7 +235,6 @@ class PetWindow(QWidget):
     def _build_context_menu(self) -> QMenu:
         menu = QMenu(self)
         menu.addAction("和 Maidie 聊天", self.open_chat)
-        menu.addAction("模型设置", self.show_model_settings)
         menu.addAction("设置", self.show_settings)
         menu.addSeparator()
         menu.addAction("帮助与说明", self.show_help)
@@ -255,12 +265,6 @@ class PetWindow(QWidget):
         self._dialog = SettingsDialog(self.controller, self)
         if self._dialog.exec():
             self.bubble.show_message("设置已经保存好啦。")
-            self._position_overlays()
-
-    def show_model_settings(self) -> None:
-        self._dialog = SettingsDialog(self.controller, self, initial_tab="模型与 API")
-        if self._dialog.exec():
-            self.bubble.show_message("模型设置已经保存好啦。")
             self._position_overlays()
 
     def show_help(self) -> None:
@@ -532,6 +536,7 @@ class PetWindow(QWidget):
                 dialog.close()
         if self.fence_overlay is not None:
             self.fence_overlay.close()
+        self.coding_console.close()
         self.controller.shutdown()
         self.hide()
         logger.info("Maidie shutdown complete")

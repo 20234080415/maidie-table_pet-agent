@@ -22,7 +22,10 @@ class IntentClassifier:
     )
     CODE_TASK = re.compile(
         r"修.*(?:bug|代码)|帮我.*(?:修|改).*(?:bug|代码)|代码|报错|调试|"
-        r"\b(?:bug|code|debug|fix|python|javascript|api|database|docker)\b",
+        r"分析(?:一下|下|看看)?(?:我(?:的)?|当前|这个)?(?:这个)?项目|模块.*重构|"
+        r"(?:open\s*['’]?\s*code|opencode|codex).*(?:分析|检查|修复|看看)|"
+        r"生成\s*patch|测试怎么写|功能应该加在哪里|"
+        r"\b(?:bug|code|debug|fix|python|javascript|api|database|docker|patch|refactor)\b",
         re.I,
     )
     SYSTEM_TASK = re.compile(

@@ -51,7 +51,7 @@ app_context / confidence / needs_search / search_query
 
 ## 配置
 
-在“性格与模型设置 → 千问视觉”中配置 Workspace ID、API Key、模型、区域、最大图片宽度、JPEG 质量、缓存时间、默认范围和鼠标附近区域尺寸。
+在“设置 → 千问视觉”中配置 Workspace ID、API Key、模型、区域、最大图片宽度、JPEG 质量、缓存时间、默认范围和鼠标附近区域尺寸。
 
 环境变量优先：
 

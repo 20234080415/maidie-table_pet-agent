@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication, QLabel
+from PyQt6.QtWidgets import QApplication, QLabel, QMessageBox
 
 from core.version import (
     APP_AUTHOR, APP_DESCRIPTION, APP_NAME, APP_TECH_STACK, APP_VERSION,
 )
 from ui.about_dialog import AboutDialog
 from ui.dialogs import SettingsDialog
+from ui.coding_agent_console import CodingAgentConsole
 from ui.help_dialog import HelpDialog
 from ui.settings import AboutPage, HelpPage
 
@@ -69,7 +72,65 @@ class HelpAndAboutPageTests(unittest.TestCase):
         self.assertNotIn("帮助与说明", labels)
         self.assertNotIn("关于 Maidie", labels)
         self.assertIn("模型与 API", labels)
+        self.assertIn("工作区 / Coding Agent", labels)
         dialog.close()
+
+    def test_coding_agent_settings_are_read_only_and_testable(self):
+        dialog = SettingsDialog(_Controller())
+        self.assertTrue(dialog.coding_agent_dry_run.isChecked())
+        self.assertFalse(dialog.coding_agent_dry_run.isEnabled())
+        dialog._test_coding_agent()
+        self.assertEqual(dialog.coding_agent_test_result.text(), "workspace 未配置")
+        with tempfile.TemporaryDirectory() as root:
+            dialog.workspace_root.setText(root)
+            dialog.coding_agent_command.setText("opencode")
+            with patch("core.tools.coding_agent_tool.shutil.which", return_value="opencode"):
+                dialog._test_coding_agent()
+            self.assertEqual(dialog.coding_agent_test_result.text(), "可用")
+        dialog.close()
+
+    def test_workspace_picker_updates_the_field(self):
+        dialog = SettingsDialog(_Controller())
+        with patch("ui.dialogs.QFileDialog.getExistingDirectory", return_value="C:/project"):
+            dialog._choose_workspace()
+        self.assertEqual(dialog.workspace_root.text(), "C:/project")
+        dialog.close()
+
+    def test_cancelled_opencode_install_runs_nothing(self):
+        dialog = SettingsDialog(_Controller())
+        dialog.coding_agent_installer.detect_install_methods = lambda: {"npm": "npm.cmd"}
+        dialog._refresh_install_methods(write_log=False)
+        dialog.coding_agent_installer.install_opencode = Mock()
+        with patch("ui.dialogs.QMessageBox.question",
+                   return_value=QMessageBox.StandardButton.No):
+            dialog._install_opencode()
+        dialog.coding_agent_installer.install_opencode.assert_not_called()
+        self.assertIn("取消", dialog.install_log.toPlainText())
+        dialog.close()
+
+    def test_failed_install_keeps_command_and_success_keeps_dry_run(self):
+        dialog = SettingsDialog(_Controller())
+        dialog.coding_agent_command.setText("custom-opencode")
+        dialog._on_install_finished({"success": False, "error": "network error"})
+        self.assertEqual(dialog.coding_agent_command.text(), "custom-opencode")
+        dialog._on_install_finished({"success": True, "command_path": "opencode"})
+        self.assertEqual(dialog.coding_agent_command.text(), "opencode")
+        self.assertTrue(dialog.coding_agent_dry_run.isChecked())
+        self.assertFalse(dialog.coding_agent_enabled.isChecked())
+        dialog.close()
+
+    def test_coding_console_buffers_200_lines_and_cancel_callback(self):
+        cancel = Mock(); console = CodingAgentConsole(cancel)
+        console.handle_event({"event": "start", "status": "running"})
+        for index in range(220):
+            console.handle_event({"event": "output", "stream": "stdout", "line": str(index)})
+        self.assertEqual(len(console.lines), 200)
+        self.assertTrue(next(iter(console.lines)).endswith("20"))
+        console.cancel_callback()
+        cancel.assert_called_once_with()
+        console.handle_event({"event": "finish", "status": "cancelled"})
+        self.assertIn("已取消", console.status.text())
+        console.close()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+import shutil
+import subprocess
+import tempfile
+import os
+from pathlib import Path
+from typing import Any
+
+
+class CodingAgentInstaller:
+    """Installs OpenCode through a fixed package-manager allowlist."""
+
+    INSTALLERS = {
+        "npm": ("npm", "npm.cmd"),
+        "scoop": ("scoop", "scoop.cmd"),
+        "choco": ("choco", "choco.exe"),
+    }
+
+    def __init__(self, timeout_seconds: int = 300) -> None:
+        self.timeout_seconds = max(30, min(600, int(timeout_seconds)))
+
+    def detect_install_methods(self) -> dict[str, str]:
+        detected: dict[str, str] = {}
+        for method, candidates in self.INSTALLERS.items():
+            for candidate in candidates:
+                executable = shutil.which(candidate)
+                if executable:
+                    detected[method] = executable
+                    break
+        return detected
+
+    @staticmethod
+    def detect_opencode() -> str:
+        for name in ("opencode", "opencode.exe", "opencode.cmd"):
+            executable = shutil.which(name)
+            if executable:
+                return executable
+        return ""
+
+    def detect_setup_status(self, workspace_root: str) -> dict[str, Any]:
+        root_text = str(workspace_root or "").strip()
+        root = Path(root_text).expanduser().resolve() if root_text else None
+        config_candidates = [
+            Path.home() / ".config" / "opencode" / "opencode.json",
+            Path(os.getenv("APPDATA", "")) / "opencode" / "opencode.json",
+        ]
+        return {
+            "installed": bool(self.detect_opencode()),
+            "launchable": bool(self.detect_opencode()),
+            "provider_config_detected": any(path.is_file() for path in config_candidates),
+            "agents_md": bool(root and root.is_dir() and (root / "AGENTS.md").is_file()),
+            "workspace_configured": bool(root and root.is_dir()),
+        }
+
+    def open_visible_terminal(self, workspace_root: str) -> dict[str, Any]:
+        root = Path(str(workspace_root or "")).expanduser().resolve()
+        executable = self.detect_opencode()
+        if not root.is_dir():
+            return {"ok": False, "error": "workspace 未配置或不可用"}
+        if not executable:
+            return {"ok": False, "error": "未检测到 OpenCode"}
+        try:
+            if os.name == "nt":
+                process = subprocess.Popen(
+                    ["cmd.exe", "/k", executable], cwd=str(root), shell=False,
+                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+                )
+            else:
+                process = subprocess.Popen([executable], cwd=str(root), shell=False)
+            return {"ok": True, "pid": process.pid}
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def build_install_command(self, method: str) -> list[str]:
+        normalized = str(method or "").strip().lower()
+        executable = self.detect_install_methods().get(normalized)
+        if not executable:
+            raise ValueError(f"安装方式不可用: {normalized or 'unknown'}")
+        if normalized == "npm":
+            return [executable, "install", "-g", "opencode-ai"]
+        if normalized == "scoop":
+            return [executable, "install", "opencode"]
+        if normalized == "choco":
+            return [executable, "install", "opencode", "-y"]
+        raise ValueError("不支持的安装方式")
+
+    def install_opencode(self, method: str) -> dict[str, Any]:
+        try:
+            command = self.build_install_command(method)
+        except ValueError as exc:
+            return self._result(False, method, error=str(exc))
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=tempfile.gettempdir(),
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+                timeout=self.timeout_seconds,
+                shell=False,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return self._result(
+                False, method, stdout=self._output(exc.stdout), stderr=self._output(exc.stderr),
+                error=f"安装超时（{self.timeout_seconds} 秒）",
+            )
+        except OSError as exc:
+            return self._result(False, method, error=f"安装命令无法启动: {exc}")
+
+        command_path = self.detect_opencode()
+        success = completed.returncode == 0 and bool(command_path)
+        error = ""
+        if completed.returncode != 0:
+            error = f"安装命令失败，退出码 {completed.returncode}"
+        elif not command_path:
+            error = "安装命令已完成，但重新检测后仍未找到 opencode"
+        return self._result(
+            success, method, stdout=completed.stdout, stderr=completed.stderr,
+            error=error, returncode=completed.returncode, command_path=command_path,
+        )
+
+    @staticmethod
+    def _output(value: Any) -> str:
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        return str(value or "")
+
+    @staticmethod
+    def _result(success: bool, method: str, stdout: str = "", stderr: str = "",
+                error: str = "", returncode: int | None = None,
+                command_path: str = "") -> dict[str, Any]:
+        return {
+            "success": success,
+            "method": str(method or ""),
+            "stdout": str(stdout or ""),
+            "stderr": str(stderr or ""),
+            "error": str(error or ""),
+            "returncode": returncode,
+            "command_path": str(command_path or ""),
+        }

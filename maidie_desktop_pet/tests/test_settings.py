@@ -80,6 +80,59 @@ class ConfigStoreTests(unittest.TestCase):
     def test_fence_overlay_is_enabled_by_default(self):
         self.assertTrue(self.store.load()["fence"]["show_overlay"])
 
+    def test_coding_agent_uses_disabled_read_only_defaults(self):
+        saved = self.store.load()
+        self.assertEqual(saved["workspace"]["root"], "")
+        self.assertFalse(saved["coding_agent"]["enabled"])
+        self.assertTrue(saved["coding_agent"]["dry_run"])
+        self.assertEqual(saved["coding_agent"]["timeout_seconds"], 120)
+
+    def test_legacy_config_is_completed_with_coding_agent_fields(self):
+        saved = self.store.load()
+        self.assertEqual(saved["workspace"], {"root": ""})
+        self.assertEqual(set(saved["coding_agent"]), {
+            "enabled", "provider", "command", "timeout_seconds", "dry_run",
+            "idle_timeout_seconds",
+        })
+
+    def test_workspace_and_coding_agent_settings_can_be_saved(self):
+        root = str(Path(self.temp.name).resolve())
+        self.store.update_user_settings({
+            "workspace_root": root,
+            "coding_agent_enabled": True,
+            "coding_agent_provider": "codex",
+            "coding_agent_command": "codex",
+            "coding_agent_timeout_seconds": 90,
+            "coding_agent_dry_run": True,
+        })
+        saved = self.store.load()
+        self.assertEqual(saved["workspace"]["root"], root)
+        self.assertTrue(saved["coding_agent"]["enabled"])
+        self.assertEqual(saved["coding_agent"]["provider"], "codex")
+
+    def test_coding_agent_safety_values_are_normalized(self):
+        self.store.update_user_settings({
+            "coding_agent_provider": "unsafe-provider",
+            "coding_agent_timeout_seconds": 9999,
+            "coding_agent_dry_run": False,
+        })
+        saved = self.store.load()["coding_agent"]
+        self.assertEqual(saved["provider"], "opencode")
+        self.assertEqual(saved["timeout_seconds"], 600)
+        self.assertTrue(saved["dry_run"])
+        self.store.update_user_settings({"coding_agent_timeout_seconds": -10})
+        self.assertEqual(self.store.load()["coding_agent"]["timeout_seconds"], 1)
+
+    def test_public_coding_settings_only_include_ui_fields(self):
+        config = self.store.load()
+        config["coding_agent"]["private_token"] = "must-not-leak"
+        self.store._atomic_write(config)
+        public = self.store.public_settings()
+        self.assertEqual(public["coding_agent_provider"], "opencode")
+        self.assertTrue(public["coding_agent_dry_run"])
+        self.assertNotIn("must-not-leak", repr(public))
+        self.assertNotIn("private_token", public)
+
     def test_vision_settings_save_without_exposing_key(self):
         self.store.update_user_settings({
             "vision_workspace_id": "ws-123",

@@ -78,10 +78,11 @@ class ShutdownTests(unittest.TestCase):
         menu = window._build_context_menu()
         actions = {action.text(): action for action in menu.actions() if action.text()}
         for label in (
-            "和 Maidie 聊天", "模型设置", "设置", "帮助与说明",
+            "和 Maidie 聊天", "设置", "帮助与说明",
             "关于 Maidie", "检查更新", "退出",
         ):
             self.assertIn(label, actions)
+        self.assertNotIn("模型设置", actions)
         self.assertFalse(actions["检查更新"].isEnabled())
         window.shutdown()
         window.close()

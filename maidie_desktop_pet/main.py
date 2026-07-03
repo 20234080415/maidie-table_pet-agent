@@ -15,7 +15,7 @@ from core.pet import PetController
 from core.actions import ActionRegistry
 from core.settings import ConfigStore
 from core.plugins.network import NetworkPlugin
-from core.tools import (MemoryTool, ScreenTool, SearchTool, SystemTool, TimeTool,
+from core.tools import (CodingAgentTool, MemoryTool, ScreenTool, SearchTool, SystemTool, TimeTool,
                         ToolRegistry, WeatherTool)
 from core.agent import ConfirmationBroker
 from core.awareness import AppTracker, ClipboardTracker, IdleDetector, MouseTracker, WindowTracker
@@ -65,6 +65,7 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
         TimeTool(), WeatherTool(), SearchTool(network_plugin),
         ScreenTool(awareness, vision_service),
         MemoryTool(memory), system_tool,
+        CodingAgentTool(config.get("workspace", {}), config.get("coding_agent", {})),
     ])
     personality_prompt = config_store.personality_prompt(config)
     router = BrainRouter(
