@@ -49,6 +49,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     contents_directory=".",
+    icon=str(project_root / "packaging" / "maidie.ico"),
 )
 
 coll = COLLECT(

@@ -88,6 +88,31 @@ dist\Maidie\Maidie.exe
 
 构建包使用 `packaging/config.json`，其中不应出现真实 Key。首次运行后可在发布目录的 `config/config.json` 中配置，也可以使用环境变量。
 
+## 构建安装包
+
+正式发布建议在 one-folder 产物外再封装 Inno Setup 安装包。先安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)，然后运行：
+
+```powershell
+.\build_installer.bat 0.1.0
+```
+
+版本参数可省略，默认使用 `0.1.0`。脚本每次都会先调用 `build_exe.bat`，确保安装包包含最新代码，然后输出：
+
+```text
+dist\installer\Maidie-Setup.exe
+```
+
+安装包按当前用户安装到 `%LOCALAPPDATA%\Programs\Maidie`，无需管理员权限，并创建开始菜单快捷方式。桌面快捷方式由用户在安装界面选择。
+
+升级安装不会覆盖用户已经修改的 `config\config.json`；卸载时也会保留配置和本地记忆数据库，避免误删用户数据。若 Inno Setup 安装在自定义位置，可设置：
+
+```powershell
+$env:INNO_SETUP_COMPILER = "D:\Tools\Inno Setup 6\ISCC.exe"
+.\build_installer.bat 0.1.0
+```
+
+`packaging/maidie.ico` 同时用于应用 EXE、安装程序和快捷方式。透明图标源文件为 `packaging/maidie-icon.png`。
+
 ## 启动问题排查
 
 - 无法创建虚拟环境：确认 `python --version` 可用且版本不低于 3.10。
@@ -95,3 +120,4 @@ dist\Maidie\Maidie.exe
 - OCR 不可用：检查可执行文件路径和 `eng`、`chi_sim` 语言包。
 - API 请求失败：检查 Base URL、模型名称和 Key，详见[配置说明](CONFIG.md)。
 - 打包失败：确认当前环境为 Python 3.10+，并检查 PyInstaller 输出；不要只复制生成的 EXE。
+- 安装包失败：确认已安装 Inno Setup 6，或设置 `INNO_SETUP_COMPILER`。

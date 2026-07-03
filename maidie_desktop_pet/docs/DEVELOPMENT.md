@@ -94,6 +94,11 @@ Qt UI 测试使用 `QT_QPA_PLATFORM=offscreen`，不需要显示真实窗口。
 - 新增通过字符串动态导入的插件包时，应加入 `hiddenimports` 或使用 `collect_submodules`。
 - 新增配置字段时，同时更新 `packaging/config.json`，但绝不能写入真实 Key。
 - 发布前应从干净目录运行 `build_exe.bat`，启动 `dist/Maidie/Maidie.exe` 并检查动画、配置写入、日志和记忆数据库。
+- `build_installer.bat [version]` 使用 `packaging/maidie.iss` 将 one-folder 产物封装为 Inno Setup 安装包。
+- 安装包构建始终先重建 EXE，避免把旧的 `dist/Maidie` 误装进新版本。
+- `packaging/maidie-icon.png` 是透明图标源，`packaging/maidie.ico` 是 EXE、安装器和快捷方式共用的多尺寸图标。
+- 安装目录位于当前用户的 LocalAppData，确保配置、日志和记忆可写，同时避免请求管理员权限。
+- `config/config.json` 使用 `onlyifdoesntexist` 和 `uninsneveruninstall`；修改安装规则时必须继续保护用户配置。
 
 ## 未来扩展方向
 
