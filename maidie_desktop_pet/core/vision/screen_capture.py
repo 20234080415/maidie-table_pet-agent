@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import sys
 from ctypes import wintypes
 from typing import Callable
@@ -13,10 +14,16 @@ from core.vision.errors import VisionCaptureError
 class ScreenCapture:
     def __init__(self, grabber: Callable[..., Image.Image] | None = None,
                  cursor_provider: Callable[[], tuple[int, int]] | None = None,
-                 bounds_provider: Callable[[], tuple[int, int, int, int]] | None = None) -> None:
+                 bounds_provider: Callable[[], tuple[int, int, int, int]] | None = None,
+                 active_window_bounds_provider: Callable[[], tuple[int, int, int, int]] | None = None,
+                 self_pid: int | None = None) -> None:
         self._grabber = grabber or ImageGrab.grab
         self._cursor_provider = cursor_provider or self._cursor_position
         self._bounds_provider = bounds_provider or self._virtual_screen_bounds
+        self._self_pid = os.getpid() if self_pid is None else self_pid
+        self._active_window_bounds_provider = (
+            active_window_bounds_provider or self._external_active_window_bounds
+        )
 
     def capture_fullscreen(self) -> Image.Image:
         try:
@@ -29,22 +36,55 @@ class ScreenCapture:
 
     def capture_active_window(self) -> Image.Image:
         try:
-            if sys.platform != "win32":
-                raise RuntimeError("active-window capture is only available on Windows")
-            user32 = ctypes.windll.user32
-            hwnd = user32.GetForegroundWindow()
-            rect = wintypes.RECT()
-            if not hwnd or not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-                raise RuntimeError("foreground window bounds unavailable")
-            bbox = (rect.left, rect.top, rect.right, rect.bottom)
+            bbox = self._active_window_bounds_provider()
             if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
                 raise RuntimeError("foreground window has invalid bounds")
             image = self._grabber(bbox=bbox, all_screens=True)
             if not isinstance(image, Image.Image):
                 raise TypeError("capture returned no image")
             return image
-        except Exception:
-            return self.capture_fullscreen()
+        except VisionCaptureError:
+            raise
+        except Exception as exc:
+            raise VisionCaptureError(
+                "没有找到可读取的外部窗口，请先切换到目标窗口"
+            ) from exc
+
+    def _external_active_window_bounds(self) -> tuple[int, int, int, int]:
+        """Return the nearest visible non-Maidie window in desktop Z order."""
+        if sys.platform != "win32":
+            raise RuntimeError("active-window capture is only available on Windows")
+        user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = ctypes.c_void_p
+        foreground = user32.GetForegroundWindow()
+
+        def is_external(handle: int) -> bool:
+            if not handle or not user32.IsWindowVisible(handle) or user32.IsIconic(handle):
+                return False
+            pid = ctypes.c_ulong()
+            user32.GetWindowThreadProcessId(handle, ctypes.byref(pid))
+            return pid.value != self._self_pid
+
+        handle = foreground if is_external(foreground) else None
+        if not handle:
+            candidates: list[int] = []
+            callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+            def visit(candidate: int, _lparam: int) -> bool:
+                if is_external(candidate) and user32.GetWindowTextLengthW(candidate) > 0:
+                    candidates.append(candidate)
+                    return False
+                return True
+
+            callback = callback_type(visit)
+            user32.EnumWindows(callback, 0)
+            handle = candidates[0] if candidates else None
+        if not handle:
+            raise RuntimeError("no external window is available")
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(handle, ctypes.byref(rect)):
+            raise RuntimeError("external window bounds unavailable")
+        return rect.left, rect.top, rect.right, rect.bottom
 
     def capture_cursor_region(self, width: int = 1000,
                               height: int = 800) -> Image.Image:

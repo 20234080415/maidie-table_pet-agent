@@ -53,6 +53,34 @@ class VisionScopeDetectionTests(unittest.TestCase):
 
 
 class RegionCaptureTests(unittest.TestCase):
+    def test_active_window_uses_external_window_bounds(self):
+        calls = []
+
+        def grabber(**kwargs):
+            calls.append(kwargs)
+            return Image.new("RGB", (800, 600))
+
+        capture = ScreenCapture(
+            grabber=grabber,
+            active_window_bounds_provider=lambda: (100, 50, 900, 650),
+        )
+        capture.capture_active_window()
+        self.assertEqual(calls, [{"bbox": (100, 50, 900, 650), "all_screens": True}])
+
+    def test_active_window_does_not_fallback_to_fullscreen(self):
+        grabber = Mock()
+
+        def no_external_window():
+            raise RuntimeError("no external window")
+
+        capture = ScreenCapture(
+            grabber=grabber,
+            active_window_bounds_provider=no_external_window,
+        )
+        with self.assertRaises(VisionCaptureError):
+            capture.capture_active_window()
+        grabber.assert_not_called()
+
     def test_capture_region_clamps_to_screen(self):
         calls = []
 
