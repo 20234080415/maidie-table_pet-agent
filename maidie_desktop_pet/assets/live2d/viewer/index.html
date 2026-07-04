@@ -11,9 +11,10 @@
       border-radius: 8px; background: rgba(45, 31, 38, .88); white-space: pre-wrap; }
     canvas { width: 100%; height: 100%; }
   </style>
-  <script src="vendor/pixi.min.js"></script>
-  <script src="vendor/live2dcubismcore.min.js"></script>
-  <script src="vendor/cubism4.min.js"></script>
+  <script>window.__live2dRuntimeErrors = [];</script>
+  <script src="vendor/pixi.min.js" onerror="window.__live2dRuntimeErrors.push('vendor/pixi.min.js')"></script>
+  <script src="vendor/live2dcubismcore.min.js" onerror="window.__live2dRuntimeErrors.push('vendor/live2dcubismcore.min.js')"></script>
+  <script src="vendor/cubism4.min.js" onerror="window.__live2dRuntimeErrors.push('vendor/cubism4.min.js')"></script>
 </head>
 <body>
   <div id="status">Waiting for a model…</div>
@@ -22,15 +23,24 @@
     let app = null;
     let currentModel = null;
     const statusNode = document.getElementById("status");
-    const runtimeMessage = "Live2D Web Runtime is not installed. Please place runtime files under assets/live2d/viewer/vendor/ or configure runtime path.";
+    const runtimeMessage = "Live2D runtime files are missing. Please place required runtime files under assets/live2d/viewer/vendor/.";
+    let previewState = {ok: false, code: "idle", message: "Waiting for a model…"};
 
     function result(ok, code, message) {
       statusNode.textContent = message;
-      return {ok, code, message};
+      previewState = {ok, code, message};
+      return previewState;
     }
 
     function runtimeReady() {
-      return Boolean(window.PIXI && PIXI.Application && PIXI.live2d && PIXI.live2d.Live2DModel);
+      return window.__live2dRuntimeErrors.length === 0 &&
+        Boolean(window.PIXI && PIXI.Application && PIXI.live2d && PIXI.live2d.Live2DModel);
+    }
+
+    function normalizeModelUrl(value) {
+      const text = String(value || "");
+      if (/^[a-z][a-z0-9+.-]*:/i.test(text)) return text;
+      return encodeURI("file:///" + text.replace(/\\/g, "/"));
     }
 
     async function loadModelAsync(model3JsonPath) {
@@ -45,13 +55,14 @@
           app.stage.removeChild(currentModel);
           currentModel.destroy({children: true});
         }
-        currentModel = await PIXI.live2d.Live2DModel.from(model3JsonPath);
+        currentModel = await PIXI.live2d.Live2DModel.from(normalizeModelUrl(model3JsonPath));
         app.stage.addChild(currentModel);
         const scale = Math.min(app.renderer.width / currentModel.width,
           app.renderer.height / currentModel.height) * 0.82;
         currentModel.scale.set(scale);
         currentModel.anchor.set(0.5, 0.5);
         currentModel.position.set(app.renderer.width / 2, app.renderer.height / 2);
+        window.__maidieLive2DModel = currentModel;
         return result(true, "loaded", "Live2D model loaded.");
       } catch (error) {
         return result(false, "model_load_failed", "Live2D model load failed: " + String(error));
@@ -62,6 +73,15 @@
       if (!runtimeReady()) return result(false, "runtime_missing", runtimeMessage);
       loadModelAsync(model3JsonPath);
       return result(true, "loading", "Loading Live2D model…");
+    };
+
+    window.getPreviewState = function() {
+      return Object.assign({}, previewState, {
+        runtimeFilesLoaded: window.__live2dRuntimeErrors.length === 0,
+        missingRuntimeFiles: window.__live2dRuntimeErrors.slice(),
+        canvasCount: document.querySelectorAll("canvas").length,
+        modelLoaded: Boolean(window.__maidieLive2DModel)
+      });
     };
 
     window.setExpression = function(name) {
@@ -87,6 +107,13 @@
     };
 
     if (!runtimeReady()) result(false, "runtime_missing", runtimeMessage);
+    window.addEventListener("resize", function() {
+      if (!app || !currentModel) return;
+      const scale = Math.min(app.renderer.width / currentModel.width,
+        app.renderer.height / currentModel.height) * 0.82;
+      currentModel.scale.set(scale);
+      currentModel.position.set(app.renderer.width / 2, app.renderer.height / 2);
+    });
   </script>
 </body>
 </html>

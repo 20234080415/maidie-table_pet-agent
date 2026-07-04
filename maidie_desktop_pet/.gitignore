@@ -18,5 +18,6 @@ memory/scheduled_tasks.json
 *.exp3.json
 assets/live2d/models/
 assets/live2d/sample_*/
+assets/live2d/**/texture*/
 assets/live2d/viewer/vendor/*
 !assets/live2d/viewer/vendor/README.md

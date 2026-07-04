@@ -10,6 +10,7 @@ from animation.live2d_web import (Live2DWebPreview, resolve_animation_backend,
                                   runtime_status, viewer_root)
 from animation.model_manager import AnimationModelRegistry
 from core.settings import ConfigStore
+from ui.live2d_preview_dialog import build_load_model_script, preview_process_arguments
 
 
 class AnimationModelRegistryTests(unittest.TestCase):
@@ -81,7 +82,7 @@ class AnimationModelRegistryTests(unittest.TestCase):
             )
         self.assertFalse(status.available)
         self.assertEqual(status.code, "runtime_missing")
-        self.assertIn("Live2D Web Runtime is not installed", status.message)
+        self.assertIn("Live2D runtime files are missing", status.message)
         self.assertEqual(len(status.details["missing_files"]), 3)
 
     def test_viewer_exposes_required_javascript_api(self):
@@ -89,11 +90,37 @@ class AnimationModelRegistryTests(unittest.TestCase):
         self.assertIn("window.loadModel", html)
         self.assertIn("window.setExpression", html)
         self.assertIn("window.setParameter", html)
+        self.assertIn("window.getPreviewState", html)
+        self.assertIn("Live2D runtime files are missing", html)
         empty_runtime = self.root / "empty-viewer"
         empty_runtime.mkdir()
         installed, missing = runtime_status(empty_runtime)
         self.assertFalse(installed)
         self.assertTrue(missing)
+
+    def test_windows_model_path_is_passed_as_safe_file_url_json(self):
+        script = build_load_model_script(
+            Path(r"C:\Users\测试 用户\Live2D\model's demo.model3.json")
+        )
+        self.assertTrue(script.startswith("window.loadModel("))
+        argument = script[len("window.loadModel("):-1]
+        decoded = json.loads(argument)
+        self.assertTrue(decoded.startswith("file:///"))
+        self.assertIn("model's demo.model3.json", decoded)
+        self.assertNotIn("\\", decoded)
+
+    def test_preview_uses_crash_isolated_child_process(self):
+        model = AnimationModelRegistry().import_model3_json(
+            self._model_file("A/a.model3.json"), root=self.root
+        )
+        arguments = preview_process_arguments(model)
+        self.assertEqual(arguments[:2], ["-m", "ui.live2d_preview_process"])
+        self.assertIn(str(Path(model.model3_json).resolve()), arguments)
+        source = (Path(__file__).parents[1] / "ui" / "live2d_preview_dialog.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("QProcess", source)
+        self.assertNotIn("QtWebEngineWidgets", source)
 
     def test_preview_dialog_module_imports_without_webengine(self):
         with patch("animation.live2d_web.find_spec", return_value=None):

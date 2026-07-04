@@ -1,0 +1,3 @@
+# Optional dependency for the isolated Live2D preview window.
+# Keep its major/minor version aligned with the installed PyQt6 package.
+PyQt6-WebEngine>=6.6

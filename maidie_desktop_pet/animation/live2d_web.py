@@ -9,8 +9,8 @@ from animation.model_manager import AnimationModel, AnimationModelRegistry
 
 
 RUNTIME_MESSAGE = (
-    "Live2D Web Runtime is not installed. Please place runtime files under "
-    "assets/live2d/viewer/vendor/ or configure runtime path."
+    "Live2D runtime files are missing. Please place required runtime files under "
+    "assets/live2d/viewer/vendor/."
 )
 RUNTIME_FILES = (
     "pixi.min.js",
