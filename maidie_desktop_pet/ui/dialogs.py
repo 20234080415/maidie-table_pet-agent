@@ -566,6 +566,9 @@ class SettingsDialog(QDialog):
             self._live2d_preview_windows.remove(dialog)
 
     def _open_live2d_pet_window(self) -> None:
+        if self._live2d_pet_window is not None:
+            self._live2d_pet_window.close()
+            self._live2d_pet_window = None
         model_id = str(self.live2d_model.currentData() or "")
         model = next((item for item in self.live2d_registry.list_models()
                       if item.id == model_id), None)
@@ -598,6 +601,9 @@ class SettingsDialog(QDialog):
         self.live2d_preview_label.setText(str(result.get("message", "实验窗口已打开。")))
 
     def _open_live2d_appearance_window(self) -> None:
+        if self._live2d_appearance_window is not None:
+            self._live2d_appearance_window.close()
+            self._live2d_appearance_window = None
         model_id = str(self.live2d_model.currentData() or "")
         model = next((item for item in self.live2d_registry.list_models()
                       if item.id == model_id), None)
@@ -650,6 +656,22 @@ class SettingsDialog(QDialog):
             self._live2d_appearance_window.close()
             self._live2d_appearance_window = None
         self.live2d_preview_label.setText("Live2D 实验窗口已关闭。")
+
+    def _cleanup_live2d_windows(self) -> None:
+        pet_window, self._live2d_pet_window = self._live2d_pet_window, None
+        appearance_window, self._live2d_appearance_window = (
+            self._live2d_appearance_window, None
+        )
+        preview_windows, self._live2d_preview_windows = self._live2d_preview_windows, []
+        preview_servers, self._live2d_preview_servers = self._live2d_preview_servers, []
+
+        for window in (pet_window, appearance_window, *preview_windows):
+            if window is not None:
+                window.close()
+        for server in preview_servers:
+            stop = getattr(server, "stop", None)
+            if callable(stop):
+                stop()
 
     def _fallback_to_sprite(self) -> None:
         if hasattr(self, "animation_backend"):
@@ -1040,6 +1062,10 @@ class SettingsDialog(QDialog):
             return
         super().reject()
 
+    def done(self, result: int) -> None:
+        self._cleanup_live2d_windows()
+        super().done(result)
+
     def closeEvent(self, event) -> None:
         if self._live2d_scan_thread is not None:
             event.ignore()
@@ -1047,10 +1073,5 @@ class SettingsDialog(QDialog):
         if self._install_thread is not None:
             event.ignore()
             return
-        if self._live2d_pet_window is not None:
-            self._live2d_pet_window.close()
-            self._live2d_pet_window = None
-        if self._live2d_appearance_window is not None:
-            self._live2d_appearance_window.close()
-            self._live2d_appearance_window = None
+        self._cleanup_live2d_windows()
         super().closeEvent(event)

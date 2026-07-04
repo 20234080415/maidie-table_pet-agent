@@ -209,5 +209,116 @@ class Live2DPetWindowTests(unittest.TestCase):
                         "QtWebEngineWidgets must be imported before QApplication()")
 
 
+class SettingsLive2DLifecycleTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from PyQt6.QtWidgets import QApplication
+        cls._app = QApplication.instance() or QApplication([])
+
+    def _dialog(self):
+        from PyQt6.QtWidgets import QDialog
+        from ui.dialogs import SettingsDialog
+        dialog = SettingsDialog.__new__(SettingsDialog)
+        QDialog.__init__(dialog)
+        dialog._live2d_scan_thread = None
+        dialog._install_thread = None
+        dialog._live2d_pet_window = None
+        dialog._live2d_appearance_window = None
+        dialog._live2d_preview_windows = []
+        dialog._live2d_preview_servers = []
+        return dialog
+
+    def _attach_live2d_resources(self, dialog):
+        resources = [MagicMock(), MagicMock(), MagicMock()]
+        server = MagicMock()
+        dialog._live2d_pet_window = resources[0]
+        dialog._live2d_appearance_window = resources[1]
+        dialog._live2d_preview_windows = [resources[2]]
+        dialog._live2d_preview_servers = [server]
+        return resources, server
+
+    def _assert_cleaned(self, dialog, resources, server):
+        for resource in resources:
+            resource.close.assert_called_once()
+        server.stop.assert_called_once()
+        self.assertIsNone(dialog._live2d_pet_window)
+        self.assertIsNone(dialog._live2d_appearance_window)
+        self.assertEqual(dialog._live2d_preview_windows, [])
+        self.assertEqual(dialog._live2d_preview_servers, [])
+
+    def test_accept_cleans_live2d_resources(self):
+        dialog = self._dialog()
+        resources, server = self._attach_live2d_resources(dialog)
+        dialog.accept()
+        self._assert_cleaned(dialog, resources, server)
+
+    def test_reject_cleans_live2d_resources(self):
+        dialog = self._dialog()
+        resources, server = self._attach_live2d_resources(dialog)
+        dialog.reject()
+        self._assert_cleaned(dialog, resources, server)
+
+    def test_close_event_cleans_live2d_resources_idempotently(self):
+        from PyQt6.QtGui import QCloseEvent
+        dialog = self._dialog()
+        resources, server = self._attach_live2d_resources(dialog)
+        dialog.closeEvent(QCloseEvent())
+        dialog._cleanup_live2d_windows()
+        self._assert_cleaned(dialog, resources, server)
+
+    def test_reopening_appearance_closes_old_window_without_touching_debug(self):
+        dialog = self._dialog()
+        old_appearance = MagicMock()
+        debug_window = MagicMock()
+        new_appearance = MagicMock()
+        model = MagicMock(id="model-id")
+        dialog._live2d_appearance_window = old_appearance
+        dialog._live2d_pet_window = debug_window
+        dialog.live2d_model = MagicMock()
+        dialog.live2d_model.currentData.return_value = "model-id"
+        dialog.live2d_registry = MagicMock()
+        dialog.live2d_registry.list_models.return_value = [model]
+        dialog.live2d_preview_label = MagicMock()
+        with patch("ui.dialogs.create_live2d_pet_window",
+                   return_value=(new_appearance, {"ok": True, "message": "opened"})):
+            dialog._open_live2d_appearance_window()
+        old_appearance.close.assert_called_once()
+        self.assertIs(dialog._live2d_appearance_window, new_appearance)
+        self.assertIs(dialog._live2d_pet_window, debug_window)
+
+    def test_reopening_debug_closes_old_window_without_touching_appearance(self):
+        dialog = self._dialog()
+        old_debug = MagicMock()
+        appearance_window = MagicMock()
+        new_debug = MagicMock()
+        model = MagicMock(id="model-id")
+        dialog._live2d_pet_window = old_debug
+        dialog._live2d_appearance_window = appearance_window
+        dialog.live2d_model = MagicMock()
+        dialog.live2d_model.currentData.return_value = "model-id"
+        dialog.live2d_registry = MagicMock()
+        dialog.live2d_registry.list_models.return_value = [model]
+        dialog.live2d_preview_label = MagicMock()
+        with patch("ui.dialogs.create_live2d_pet_window",
+                   return_value=(new_debug, {"ok": True, "message": "opened"})):
+            dialog._open_live2d_pet_window()
+        old_debug.close.assert_called_once()
+        self.assertIs(dialog._live2d_pet_window, new_debug)
+        self.assertIs(dialog._live2d_appearance_window, appearance_window)
+
+    def test_close_button_closes_debug_and_appearance_independently(self):
+        dialog = self._dialog()
+        debug_window = MagicMock()
+        appearance_window = MagicMock()
+        dialog._live2d_pet_window = debug_window
+        dialog._live2d_appearance_window = appearance_window
+        dialog.live2d_preview_label = MagicMock()
+        dialog._close_live2d_pet_window()
+        debug_window.close.assert_called_once()
+        appearance_window.close.assert_called_once()
+        self.assertIsNone(dialog._live2d_pet_window)
+        self.assertIsNone(dialog._live2d_appearance_window)
+
+
 if __name__ == "__main__":
     unittest.main()

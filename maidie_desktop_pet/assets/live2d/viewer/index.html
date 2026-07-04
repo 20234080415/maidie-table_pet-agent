@@ -959,8 +959,10 @@
       const params = new URLSearchParams(window.location.search);
       const sessionId = params.get("session");
       if (!sessionId) return;
+      if (window.__maidieCommandPollTimer) return;
       const apiUrl = "/api/commands?session=" + encodeURIComponent(sessionId);
       let pollTimer = null;
+      let isPolling = false;
 
       async function executeRemoteCommand(command, args) {
         if (!currentModel) {
@@ -989,6 +991,8 @@
       }
 
       async function pollCommands() {
+        if (isPolling) return;
+        isPolling = true;
         try {
           const response = await window.__maidieOriginalFetch(apiUrl, {cache: "no-store"});
           if (!response.ok) {
@@ -1009,6 +1013,8 @@
           }
         } catch (error) {
           controlResult(false, "command_poll", "poll_error", "命令轮询异常：" + String(error));
+        } finally {
+          isPolling = false;
         }
       }
 

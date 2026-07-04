@@ -20,6 +20,7 @@ class Live2DPreviewServer:
     """Loopback-only HTTP server for one Live2D model and the local viewer."""
 
     host = "127.0.0.1"
+    COMMAND_QUEUE_MAXLEN = 300
 
     def __init__(self, model: AnimationModel, *, viewer: str | Path | None = None,
                  lifetime_seconds: float = 1800) -> None:
@@ -34,6 +35,7 @@ class Live2DPreviewServer:
         self.request_log: deque[dict[str, Any]] = deque(maxlen=200)
         self._session_id: str = ""
         self._command_queues: dict[str, deque[dict[str, Any]]] = {}
+        self._command_lock = threading.Lock()
 
     @property
     def port(self) -> int:
@@ -53,7 +55,10 @@ class Live2DPreviewServer:
             raise FileNotFoundError("Live2D viewer/index.html 不存在。")
         if self._httpd is None:
             self._session_id = uuid.uuid4().hex
-            self._command_queues[self._session_id] = deque()
+            with self._command_lock:
+                self._command_queues[self._session_id] = deque(
+                    maxlen=self.COMMAND_QUEUE_MAXLEN
+                )
             handler = partial(_PreviewRequestHandler, preview=self)
             self._httpd = ThreadingHTTPServer((self.host, 0), handler)
             self._httpd.daemon_threads = True
@@ -88,18 +93,26 @@ class Live2DPreviewServer:
         return url
 
     def enqueue_command(self, session_id: str, command: dict[str, Any]) -> bool:
-        if session_id not in self._command_queues:
-            return False
-        self._command_queues[session_id].append(dict(command))
-        return True
+        with self._command_lock:
+            queue = self._command_queues.get(session_id)
+            if queue is None:
+                return False
+            queue.append(dict(command))
+            return True
+
+    def has_command_session(self, session_id: str) -> bool:
+        with self._command_lock:
+            return session_id in self._command_queues
 
     def drain_commands(self, session_id: str) -> list[dict[str, Any]]:
-        queue = self._command_queues.get(session_id)
-        if queue is None:
-            return []
-        commands = list(queue)
-        queue.clear()
-        return commands
+        with self._command_lock:
+            queue = self._command_queues.get(session_id)
+            if queue is None:
+                return []
+            commands: list[dict[str, Any]] = []
+            while queue:
+                commands.append(queue.popleft())
+            return commands
 
     def stop(self) -> None:
         timer, self._stop_timer = self._stop_timer, None
@@ -112,7 +125,8 @@ class Live2DPreviewServer:
         thread, self._thread = self._thread, None
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=2)
-        self._command_queues.clear()
+        with self._command_lock:
+            self._command_queues.clear()
 
     def resolve_request_path(self, request_path: str) -> Path | None:
         path = unquote(urlsplit(request_path).path)
@@ -186,7 +200,7 @@ class _PreviewRequestHandler(BaseHTTPRequestHandler):
             self._error(400, "missing_session", "session 参数缺失。", True,
                         {"request_path": parsed.path})
             return True
-        if session_id not in self.preview._command_queues:
+        if not self.preview.has_command_session(session_id):
             self._error(404, "unknown_session", "未知的 command session。", True,
                         {"request_path": parsed.path, "session_id": session_id})
             return True

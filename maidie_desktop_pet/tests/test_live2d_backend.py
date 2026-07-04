@@ -75,6 +75,9 @@ class Live2DBackendTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(result["queued"])
         self.assertTrue(result["delivered"])
+        self.assertTrue(result["submitted"])
+        self.assertTrue(result["accepted_by_sink"])
+        self.assertEqual(backend.pending_commands, ())
         self.assertEqual(len(captured), 1)
         self.assertEqual(captured[0]["command"], "applySemanticState")
         self.assertEqual(captured[0]["args"], ["speaking"])
@@ -87,15 +90,25 @@ class Live2DBackendTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(result["queued"])
         self.assertFalse(result["delivered"])
+        self.assertFalse(result["submitted"])
+        self.assertEqual(len(backend.pending_commands), 1)
         self.assertIn("command_sink 提交失败", result["error"])
 
-    def test_drain_commands_with_sink_marks_submitted(self):
+    def test_successful_sink_does_not_retain_local_commands(self):
         backend = Live2DBackend(command_sink=lambda cmd: True)
-        backend.apply_state("confused")
-        backend.set_parameter("ParamAngleX", 10)
-        commands = backend.drain_commands()
-        self.assertEqual(len(commands), 2)
-        self.assertTrue(all(c["delivered"] for c in commands))
+        for _ in range(backend.LOCAL_QUEUE_MAXLEN + 50):
+            backend.apply_state("confused")
+        self.assertEqual(backend.pending_commands, ())
+        self.assertEqual(backend.drain_commands(), [])
+
+    def test_local_queue_is_bounded_and_can_be_drained(self):
+        for index in range(self.backend.LOCAL_QUEUE_MAXLEN + 25):
+            self.backend.set_parameter("ParamAngleX", index)
+        self.assertEqual(len(self.backend.pending_commands), self.backend.LOCAL_QUEUE_MAXLEN)
+        commands = self.backend.drain_commands()
+        self.assertEqual(len(commands), self.backend.LOCAL_QUEUE_MAXLEN)
+        self.assertEqual(commands[0]["args"], ["ParamAngleX", 25.0])
+        self.assertEqual(self.backend.pending_commands, ())
 
 
 if __name__ == "__main__":

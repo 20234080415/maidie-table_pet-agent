@@ -49,8 +49,11 @@ class BackendSwitchTests(unittest.TestCase):
 
     def test_live2d_backend_with_valid_model_attempts_window(self):
         mock_window = MagicMock()
-        with patch("ui.live2d_pet_window.create_live2d_pet_window",
-                   return_value=(mock_window, {"ok": True, "code": "pet_window_opened"})):
+        available_status = MagicMock(available=True)
+        with patch("animation.backend_selector.resolve_animation_backend",
+                   return_value=("live2d_web", available_status)), \
+                patch("ui.live2d_pet_window.create_live2d_pet_window",
+                      return_value=(mock_window, {"ok": True, "code": "pet_window_opened"})) as create:
             from animation.backend_selector import try_create_live2d_window
             window, result = try_create_live2d_window({
                 "backend": "live2d_web",
@@ -59,10 +62,14 @@ class BackendSwitchTests(unittest.TestCase):
             })
             self.assertIs(window, mock_window)
             self.assertTrue(result["ok"])
+            create.assert_called_once_with(self.model)
 
     def test_live2d_window_creation_failure_falls_back(self):
-        with patch("ui.live2d_pet_window.create_live2d_pet_window",
-                   return_value=(None, {"ok": False, "code": "webengine_missing", "message": "no webengine"})):
+        available_status = MagicMock(available=True)
+        with patch("animation.backend_selector.resolve_animation_backend",
+                   return_value=("live2d_web", available_status)), \
+                patch("ui.live2d_pet_window.create_live2d_pet_window",
+                      return_value=(None, {"ok": False, "code": "webengine_missing", "message": "no webengine"})):
             from animation.backend_selector import try_create_live2d_window
             window, result = try_create_live2d_window({
                 "backend": "live2d_web",
@@ -80,8 +87,11 @@ class BackendSwitchTests(unittest.TestCase):
 
     def test_resolve_backend_and_window_live2d_returns_window(self):
         mock_window = MagicMock()
-        with patch("ui.live2d_pet_window.create_live2d_pet_window",
-                   return_value=(mock_window, {"ok": True, "code": "pet_window_opened"})):
+        available_status = MagicMock(available=True)
+        with patch("animation.backend_selector.resolve_animation_backend",
+                   return_value=("live2d_web", available_status)), \
+                patch("ui.live2d_pet_window.create_live2d_pet_window",
+                      return_value=(mock_window, {"ok": True, "code": "pet_window_opened"})):
             from animation.backend_selector import resolve_backend_and_window
             backend, status, window = resolve_backend_and_window({
                 "backend": "live2d_web",
@@ -92,8 +102,11 @@ class BackendSwitchTests(unittest.TestCase):
             self.assertIs(window, mock_window)
 
     def test_resolve_backend_falls_back_to_sprite_on_live2d_failure(self):
-        with patch("ui.live2d_pet_window.create_live2d_pet_window",
-                   return_value=(None, {"ok": False, "code": "webengine_missing", "message": "no webengine"})):
+        available_status = MagicMock(available=True)
+        with patch("animation.backend_selector.resolve_animation_backend",
+                   return_value=("live2d_web", available_status)), \
+                patch("ui.live2d_pet_window.create_live2d_pet_window",
+                      return_value=(None, {"ok": False, "code": "webengine_missing", "message": "no webengine"})):
             from animation.backend_selector import resolve_backend_and_window
             backend, status, window = resolve_backend_and_window({
                 "backend": "live2d_web",

@@ -19,6 +19,8 @@ class Live2DCommand:
     error: str = ""
 
     def to_dict(self, *, submitted: bool = False) -> dict[str, Any]:
+        # ``delivered`` is retained for compatibility.  It only means that
+        # the command sink accepted the command, not that the Viewer ran it.
         return {
             "ok": True,
             "command": self.command,
@@ -27,6 +29,8 @@ class Live2DCommand:
             "error": self.error,
             "queued": True,
             "delivered": submitted,
+            "submitted": submitted,
+            "accepted_by_sink": submitted,
         }
 
 
@@ -42,8 +46,10 @@ class Live2DBackend:
         "sleepy", "dragged", "headpat",
     })
 
+    LOCAL_QUEUE_MAXLEN = 500
+
     def __init__(self, command_sink: Callable[[dict[str, Any]], bool] | None = None) -> None:
-        self._commands: deque[Live2DCommand] = deque()
+        self._commands: deque[Live2DCommand] = deque(maxlen=self.LOCAL_QUEUE_MAXLEN)
         self._shutdown = False
         self._command_sink = command_sink
 
@@ -52,8 +58,7 @@ class Live2DBackend:
         return tuple(command.to_dict() for command in self._commands)
 
     def drain_commands(self) -> list[dict[str, Any]]:
-        commands = [command.to_dict(submitted=self._command_sink is not None)
-                    for command in self._commands]
+        commands = [command.to_dict() for command in self._commands]
         self._commands.clear()
         return commands
 
@@ -63,18 +68,24 @@ class Live2DBackend:
             return {
                 "ok": False, "command": command, "args": list(args),
                 "fallback": False, "error": "Live2DBackend is shut down.",
-                "queued": False, "delivered": False,
+                "queued": False, "delivered": False, "submitted": False,
+                "accepted_by_sink": False,
             }
         payload = Live2DCommand(command, tuple(args), fallback, error)
-        self._commands.append(payload)
         result = payload.to_dict(submitted=False)
-        if self._command_sink is not None:
+        if self._command_sink is None:
+            self._commands.append(payload)
+        else:
             try:
-                delivered = self._command_sink(result)
+                submitted = bool(self._command_sink(result))
             except Exception as exc:
-                delivered = False
+                submitted = False
                 result["error"] = f"command_sink 提交失败: {exc}"
-            result["delivered"] = delivered
+            result["delivered"] = submitted
+            result["submitted"] = submitted
+            result["accepted_by_sink"] = submitted
+            if not submitted:
+                self._commands.append(payload)
         return result
 
     def load_model(self, model: AnimationModel | dict[str, Any] | str) -> dict[str, Any]:
@@ -88,7 +99,8 @@ class Live2DBackend:
             return {
                 "ok": False, "command": "loadModel", "args": [],
                 "fallback": False, "error": "model3_json is required.",
-                "queued": False, "delivered": False,
+                "queued": False, "delivered": False, "submitted": False,
+                "accepted_by_sink": False,
             }
         return self._enqueue("loadModel", source)
 
@@ -103,14 +115,16 @@ class Live2DBackend:
                     "ok": False, "command": "applySemanticState",
                     "args": [normalized, intensity], "fallback": False,
                     "error": "Intensity must be a positive finite number.",
-                    "queued": False, "delivered": False,
+                    "queued": False, "delivered": False, "submitted": False,
+                    "accepted_by_sink": False,
                 }
             if not isfinite(numeric_intensity) or numeric_intensity <= 0:
                 return {
                     "ok": False, "command": "applySemanticState",
                     "args": [normalized, intensity], "fallback": False,
                     "error": "Intensity must be a positive finite number.",
-                    "queued": False, "delivered": False,
+                    "queued": False, "delivered": False, "submitted": False,
+                    "accepted_by_sink": False,
                 }
             args = (normalized, numeric_intensity)
         if normalized in self.SUPPORTED_STATES:
@@ -136,7 +150,8 @@ class Live2DBackend:
             return {
                 "ok": False, "command": "setParameter", "args": [str(name), value],
                 "fallback": False, "error": "Parameter value must be numeric.",
-                "queued": False, "delivered": False,
+                "queued": False, "delivered": False, "submitted": False,
+                "accepted_by_sink": False,
             }
         return self._enqueue("setParameter", str(name), numeric)
 
@@ -157,7 +172,8 @@ class Live2DBackend:
             return {
                 "ok": True, "command": "shutdown", "args": [],
                 "fallback": False, "error": "", "queued": False,
-                "delivered": False,
+                "delivered": False, "submitted": False,
+                "accepted_by_sink": False,
             }
         payload = self._enqueue("shutdown")
         self._shutdown = True

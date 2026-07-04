@@ -160,6 +160,30 @@ class Live2DPreviewServerCommandTests(unittest.TestCase):
         finally:
             server.stop()
 
+    def test_command_queue_maxlen_discards_oldest(self):
+        server = self._create_server()
+        try:
+            server.start()
+            for index in range(server.COMMAND_QUEUE_MAXLEN + 7):
+                self.assertTrue(server.enqueue_command(
+                    server.session_id, {"command": "test", "args": [index]}
+                ))
+            commands = server.drain_commands(server.session_id)
+            self.assertEqual(len(commands), server.COMMAND_QUEUE_MAXLEN)
+            self.assertEqual(commands[0]["args"], [7])
+        finally:
+            server.stop()
+
+    def test_stop_clears_queues_and_is_idempotent(self):
+        server = self._create_server()
+        server.start()
+        session_id = server.session_id
+        server.enqueue_command(session_id, {"command": "reset"})
+        server.stop()
+        self.assertFalse(server.has_command_session(session_id))
+        self.assertEqual(server.drain_commands(session_id), [])
+        server.stop()
+
     def test_default_animation_backend_is_sprite(self):
         from core.settings import ConfigStore
         temp = tempfile.TemporaryDirectory()
@@ -190,6 +214,9 @@ class Live2DPreviewServerCommandTests(unittest.TestCase):
         self.assertIn("/api/commands?session=", html)
         self.assertIn("executeRemoteCommand", html)
         self.assertIn("setInterval(pollCommands, 200)", html)
+        self.assertIn("if (window.__maidieCommandPollTimer) return", html)
+        self.assertIn("if (isPolling) return", html)
+        self.assertIn("finally", html)
         for cmd in ("applySemanticState", "playMotion", "setExpression",
                      "setParameter", "startMouthTest", "stopMouthTest",
                      "setMouseFollow", "reset"):
