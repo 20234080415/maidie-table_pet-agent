@@ -185,8 +185,10 @@ python main.py
 - 设置层会把非法 provider 回退为 `opencode`，把超时限制在 1–600 秒，并无条件把 `dry_run` 保存为 `true`。
 - 页面可检测或在确认后安装 OpenCode。安装方式按 npm、Scoop、Chocolatey 顺序检测，默认优先 npm；安装超时为 300 秒。
 - OpenCode 安装成功后仅把页面中的 provider/command 调整为 `opencode`，不会自动启用 Coding Agent。OpenCode 的模型 API Key 仍需用户自行配置。
-- `idle_timeout_seconds` 默认 30 秒；后台任务长时间无输出时会停止，并提示在可见 OpenCode 终端执行 `/connect`。
+- `idle_timeout_seconds` 默认 30 秒，供 Codex 等普通行输出进程判断静默超时；OpenCode 是 TUI 工作负载，运行时忽略该静默阈值，仅使用总超时、进程状态和 OpenCode 日志判断。
 - “打开 OpenCode 配置/初始化”只负责在 `workspace.root` 中打开可见终端，用户自行执行 `/connect` 或 `/init`，Maidie 不读取凭据内容。
+
+完整接入与排障说明见 [CodingAgentTool](CODING_AGENT_TOOL.md)。
 
 ## Key 与配置安全
 

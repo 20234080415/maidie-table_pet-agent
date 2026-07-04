@@ -5,6 +5,7 @@
 - PyQt6 无边框透明窗口，默认始终置顶。
 - 支持拖动、边缘缩放、滚轮缩放和屏幕边界约束。
 - 聊天气泡与输入框是独立跟随浮窗，会避开角色和屏幕边缘。
+- 短回复保留在聊天气泡；长文本、搜索结果和 Coding Agent 分析会按 `display_type` 打开长内容面板，避免气泡承载大段内容。
 
 ## 动画系统
 
@@ -61,7 +62,9 @@ OpenCode/Codex 的输出先转换为 `summary`、`findings`、`suggested_changes
 
 同一页面提供“检测 OpenCode”“安装 OpenCode”和“重新检测”。安装前必须由用户确认，过程在后台执行并显示 stdout/stderr；可使用已有的 npm、Scoop 或 Chocolatey，但不会代替用户安装这些前置环境，也不会自动配置 OpenCode 的模型凭据。
 
-Coding Agent 属于长任务。运行时会弹出独立的小终端工作台，实时显示 stdout/stderr、状态、耗时和最近输出时间；用户可取消、清空或复制最近 200 行日志。总超时或 30 秒无输出会终止完整进程树。
+Coding Agent 属于长任务。运行时会弹出独立的小终端工作台，实时显示 stdout/stderr、状态、耗时和最近输出时间；用户可取消、清空或复制最近 200 行日志。总超时或取消会终止完整进程树；Codex 仍可使用无输出超时，OpenCode 因 TUI 可能长时间不换行，只使用总超时并结合自身日志判断状态。
+
+详细安全边界、状态和排障见 [CODING_AGENT_TOOL.md](CODING_AGENT_TOOL.md)。
 
 OpenCode 模型连接必须由用户在可见终端中执行 `/connect`；项目上下文可执行 `/init` 生成 `AGENTS.md`。Maidie 只检测配置文件和 `AGENTS.md` 是否存在，不读取或保存 API Key。
 
