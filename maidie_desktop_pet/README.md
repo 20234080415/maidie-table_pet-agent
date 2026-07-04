@@ -88,8 +88,8 @@ User Input
 `core/proactive/` 负责行为编排，`core/brain/` 负责 Agent 决策，`core/tools/`
 负责受控能力，`memory/` 负责本地持久化，`core/vision/` 与
 `core/awareness/` 负责按需屏幕上下文，Coding Agent 则通过独立只读适配层接入。
-工具契约见 [TOOL_SYSTEM.md](docs/TOOL_SYSTEM.md)，结构图谱见
-[Graph 分析报告](docs/graph/GRAPH_REPORT.md)。
+工具契约见 [TOOL_SYSTEM.md](docs/TOOL_SYSTEM.md)。项目代码结构已使用 Graphify
+生成可交互图谱，产物与重新生成说明见 [docs/graph/](docs/graph/README.md)。
 
 ## CodingAgentTool 安全边界
 
