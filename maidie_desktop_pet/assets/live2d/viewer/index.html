@@ -5,11 +5,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Maidie Live2D Preview</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #241d22; color: #f5e8ed; font-family: sans-serif; }
-    #stage { width: 100%; height: 100%; overflow: hidden; }
-    #status { position: fixed; inset: 12px 12px auto 12px; z-index: 5; padding: 10px;
-      border-radius: 8px; background: rgba(45, 31, 38, .88); white-space: pre-wrap; }
-    canvas { width: 100%; height: 100%; }
+    html, body { margin: 0; min-width: 900px; min-height: 700px; width: 100%; height: 100%;
+      overflow: hidden; color: #f5e8ed; font-family: sans-serif; }
+    body { background-color: #34373d; background-image:
+      linear-gradient(45deg, #444850 25%, transparent 25%),
+      linear-gradient(-45deg, #444850 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #444850 75%),
+      linear-gradient(-45deg, transparent 75%, #444850 75%);
+      background-size: 32px 32px; background-position: 0 0, 0 16px, 16px -16px, -16px 0; }
+    #live2d-canvas-container { position: absolute; inset: 12px; min-width: 876px;
+      min-height: 676px; overflow: hidden; border: 3px solid #62d6ff; box-sizing: border-box; }
+    #live2d-canvas-container canvas { display: block; width: 100%; height: 100%; }
+    #panel { position: fixed; inset: 24px auto auto 24px; z-index: 10; width: min(520px, 52vw);
+      padding: 12px; border-radius: 8px; background: rgba(31, 34, 40, .9); box-shadow: 0 2px 12px #0008; }
+    #status-message { font-weight: 600; white-space: pre-wrap; }
+    #model-url { margin-top: 6px; font-size: 12px; opacity: .8; word-break: break-all; }
+    #debug { margin: 10px 0; font: 12px/1.45 monospace; white-space: pre-wrap; }
+    #controls { display: flex; gap: 7px; flex-wrap: wrap; }
+    button { padding: 6px 10px; border: 1px solid #78dfff; border-radius: 5px;
+      background: #263a47; color: white; cursor: pointer; }
   </style>
   <script>window.__live2dRuntimeErrors = [];</script>
   <script src="vendor/pixi.min.js" onerror="window.__live2dRuntimeErrors.push('vendor/pixi.min.js')"></script>
@@ -17,18 +31,33 @@
   <script src="vendor/cubism4.min.js" onerror="window.__live2dRuntimeErrors.push('vendor/cubism4.min.js')"></script>
 </head>
 <body>
-  <div id="status">Waiting for a model…</div>
-  <div id="stage"></div>
+  <div id="live2d-canvas-container"></div>
+  <section id="panel">
+    <div id="status-message">Waiting for a model…</div>
+    <div id="model-url"></div>
+    <div id="debug"></div>
+    <div id="controls">
+      <button id="fit-model" type="button">Fit Model To View</button>
+      <button id="center-model" type="button">Center Model</button>
+      <button id="reset-view" type="button">Reset View</button>
+    </div>
+  </section>
   <script>
     let app = null;
     let currentModel = null;
-    const statusNode = document.getElementById("status");
+    let currentModelBounds = null;
+    let lastNetworkFailure = null;
+    const container = document.getElementById("live2d-canvas-container");
+    const statusNode = document.getElementById("status-message");
+    const modelUrlNode = document.getElementById("model-url");
+    const debugNode = document.getElementById("debug");
     const runtimeMessage = "Live2D runtime files are missing. Please place required runtime files under assets/live2d/viewer/vendor/.";
     let previewState = {ok: false, code: "idle", message: "Waiting for a model…"};
 
     function result(ok, code, message) {
       statusNode.textContent = message;
       previewState = {ok, code, message};
+      updateDebugPanel();
       return previewState;
     }
 
@@ -37,34 +66,174 @@
         Boolean(window.PIXI && PIXI.Application && PIXI.live2d && PIXI.live2d.Live2DModel);
     }
 
+    function cubismCoreVersion() {
+      try {
+        const raw = Number(window.Live2DCubismCore.Version.csmGetVersion());
+        return {raw, major: (raw >>> 24) & 255, minor: (raw >>> 16) & 255,
+          patch: raw & 65535};
+      } catch (_error) {
+        return null;
+      }
+    }
+
+    function compatibleCore() {
+      const version = cubismCoreVersion();
+      return !version || version.major <= 4;
+    }
+
+    function viewportSize() {
+      return {
+        width: Math.max(900, container.clientWidth || window.innerWidth || 900),
+        height: Math.max(700, container.clientHeight || window.innerHeight || 700)
+      };
+    }
+
+    function ensurePixiApplication() {
+      const size = viewportSize();
+      if (!app) {
+        app = new PIXI.Application({width: size.width, height: size.height,
+          backgroundAlpha: 0, antialias: true, autoStart: true});
+        const canvas = app.view || app.canvas;
+        if (!canvas) throw new Error("Pixi Application did not create a canvas.");
+        container.replaceChildren(canvas);
+      }
+      app.renderer.resize(size.width, size.height);
+      app.stage.visible = true;
+      app.stage.alpha = 1;
+      if (app.start) app.start();
+      if (app.ticker && !app.ticker.started) app.ticker.start();
+      return size;
+    }
+
+    function readModelBounds() {
+      if (!currentModel || !currentModel.getLocalBounds) return null;
+      const bounds = currentModel.getLocalBounds();
+      if (!bounds || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height) ||
+          bounds.width <= 0 || bounds.height <= 0) return null;
+      return {x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height};
+    }
+
+    function centerModel() {
+      if (!app || !currentModel || !currentModelBounds) return false;
+      const bounds = currentModelBounds;
+      currentModel.position.set(
+        app.renderer.width / 2 - (bounds.x + bounds.width / 2) * currentModel.scale.x,
+        app.renderer.height / 2 - (bounds.y + bounds.height / 2) * currentModel.scale.y
+      );
+      updateDebugPanel();
+      return true;
+    }
+
+    function fitModelToView() {
+      if (!app || !currentModel) return false;
+      currentModelBounds = readModelBounds();
+      if (!currentModelBounds) {
+        result(false, "invalid_model_bounds", "Model loaded but not visible. Check bounds, scale, position, and canvas size.");
+        return false;
+      }
+      const heightScale = app.renderer.height * 0.70 / currentModelBounds.height;
+      const widthScale = app.renderer.width * 0.82 / currentModelBounds.width;
+      const scale = Math.min(heightScale, widthScale);
+      if (!Number.isFinite(scale) || scale <= 0) {
+        result(false, "invalid_model_scale", "Model loaded but not visible. Check bounds, scale, position, and canvas size.");
+        return false;
+      }
+      currentModel.scale.set(scale, scale);
+      return centerModel();
+    }
+
+    function resetView() {
+      if (!currentModel) return false;
+      currentModel.rotation = 0;
+      currentModel.skew.set(0, 0);
+      currentModel.scale.set(1, 1);
+      currentModelBounds = readModelBounds();
+      return fitModelToView();
+    }
+
+    function updateDebugPanel() {
+      const canvas = app && (app.view || app.canvas);
+      const bounds = currentModelBounds;
+      const core = cubismCoreVersion();
+      const lines = [
+        "Pixi initialized: " + (app ? "yes" : "no"),
+        "Canvas size: " + (canvas ? canvas.width + " x " + canvas.height : "0 x 0"),
+        "Stage children count: " + (app ? app.stage.children.length : 0),
+        "Model loaded: " + (currentModel ? "yes" : "no"),
+        "Model bounds: " + (bounds ? JSON.stringify(bounds) : "unavailable"),
+        "Model width / height: " + (bounds ? bounds.width + " / " + bounds.height : "0 / 0"),
+        "Model x / y: " + (currentModel ? currentModel.x + " / " + currentModel.y : "0 / 0"),
+        "Model scale x / y: " + (currentModel ? currentModel.scale.x + " / " + currentModel.scale.y : "0 / 0"),
+        "Ticker running: " + (app && app.ticker ? String(Boolean(app.ticker.started)) : "no"),
+        "Ticker FPS: " + (app && app.ticker && Number.isFinite(app.ticker.FPS) ? app.ticker.FPS.toFixed(1) : "0")
+        ,"Cubism Core version: " + (core ? core.major + "." + core.minor + "." + core.patch : "unknown")
+      ];
+      debugNode.textContent = lines.join("\n");
+    }
+
     function normalizeModelUrl(value) {
-      const text = String(value || "");
-      if (/^[a-z][a-z0-9+.-]*:/i.test(text)) return text;
-      return encodeURI("file:///" + text.replace(/\\/g, "/"));
+      return new URL(String(value || "").replace(/\\/g, "/"), window.location.href).href;
+    }
+
+    async function diagnosticFetch(input, init) {
+      const response = await window.__maidieOriginalFetch(input, init);
+      if (!response.ok) {
+        const errorText = await response.clone().text().catch(() => "");
+        lastNetworkFailure = {status: response.status, url: response.url || String(input), errorText};
+      }
+      return response;
+    }
+
+    window.__maidieOriginalFetch = window.fetch.bind(window);
+    window.fetch = diagnosticFetch;
+
+    function networkFailureMessage(prefix, failure) {
+      return prefix + "\nHTTP status: " + failure.status + "\nRequest URL: " + failure.url +
+        "\nError text: " + (failure.errorText || "(empty response)");
     }
 
     async function loadModelAsync(model3JsonPath) {
+      const modelUrl = normalizeModelUrl(model3JsonPath);
+      modelUrlNode.textContent = "Model URL: " + modelUrl;
       if (!runtimeReady()) return result(false, "runtime_missing", runtimeMessage);
+      if (!compatibleCore()) {
+        const core = cubismCoreVersion();
+        return result(false, "runtime_incompatible",
+          "Live2D rendering runtime is incompatible: Cubism Core " + core.major + "." +
+          core.minor + "." + core.patch +
+          " cannot be rendered by pixi-live2d-display 0.4.0. Use a licensed Cubism 4 Core runtime.");
+      }
       try {
-        if (!app) {
-          app = new PIXI.Application({resizeTo: document.getElementById("stage"),
-            backgroundAlpha: 0, antialias: true});
-          document.getElementById("stage").appendChild(app.view);
-        }
+        lastNetworkFailure = null;
+        const preflight = await diagnosticFetch(modelUrl, {cache: "no-store"});
+        if (!preflight.ok) return result(false, "model_preflight_failed",
+          networkFailureMessage("Live2D model preflight failed.", lastNetworkFailure));
+        ensurePixiApplication();
         if (currentModel) {
           app.stage.removeChild(currentModel);
           currentModel.destroy({children: true});
         }
-        currentModel = await PIXI.live2d.Live2DModel.from(normalizeModelUrl(model3JsonPath));
+        currentModel = await PIXI.live2d.Live2DModel.from(modelUrl);
+        currentModel.visible = true;
+        currentModel.alpha = 1;
+        currentModel.anchor && currentModel.anchor.set(0, 0);
         app.stage.addChild(currentModel);
-        const scale = Math.min(app.renderer.width / currentModel.width,
-          app.renderer.height / currentModel.height) * 0.82;
-        currentModel.scale.set(scale);
-        currentModel.anchor.set(0.5, 0.5);
-        currentModel.position.set(app.renderer.width / 2, app.renderer.height / 2);
+        if (app.stage.children.indexOf(currentModel) < 0 || app.stage.children.length <= 0) {
+          return result(false, "model_not_on_stage", "Model loaded but was not added to the Pixi stage.");
+        }
+        if (!fitModelToView()) return previewState;
         window.__maidieLive2DModel = currentModel;
-        return result(true, "loaded", "Live2D model loaded.");
+        console.info("model added to stage", currentModel);
+        console.info("stage children count", app.stage.children.length);
+        console.info("model bounds", currentModelBounds);
+        console.info("canvas size", app.renderer.width, app.renderer.height);
+        console.info("final model position", currentModel.x, currentModel.y);
+        console.info("final model scale", currentModel.scale.x, currentModel.scale.y);
+        updateDebugPanel();
+        return result(true, "loaded", "Live2D model loaded and visible.");
       } catch (error) {
+        if (lastNetworkFailure) return result(false, "resource_load_failed",
+          networkFailureMessage("Live2D resource load failed.", lastNetworkFailure));
         return result(false, "model_load_failed", "Live2D model load failed: " + String(error));
       }
     }
@@ -77,21 +246,22 @@
 
     window.getPreviewState = function() {
       return Object.assign({}, previewState, {
+        pixiInitialized: Boolean(app),
+        canvasSize: app ? {width: app.renderer.width, height: app.renderer.height} : {width: 0, height: 0},
+        stageChildrenCount: app ? app.stage.children.length : 0,
+        modelBounds: currentModelBounds,
+        modelLoaded: Boolean(window.__maidieLive2DModel),
+        tickerRunning: Boolean(app && app.ticker && app.ticker.started),
         runtimeFilesLoaded: window.__live2dRuntimeErrors.length === 0,
         missingRuntimeFiles: window.__live2dRuntimeErrors.slice(),
-        canvasCount: document.querySelectorAll("canvas").length,
-        modelLoaded: Boolean(window.__maidieLive2DModel)
+        lastNetworkFailure
       });
     };
 
     window.setExpression = function(name) {
       if (!currentModel) return result(false, "model_not_loaded", "No Live2D model is loaded.");
-      try {
-        currentModel.expression(name);
-        return result(true, "expression_set", "Expression set: " + name);
-      } catch (error) {
-        return result(false, "expression_failed", String(error));
-      }
+      try { currentModel.expression(name); return result(true, "expression_set", "Expression set: " + name); }
+      catch (error) { return result(false, "expression_failed", String(error)); }
     };
 
     window.setParameter = function(name, value) {
@@ -101,19 +271,29 @@
         if (!core || !core.setParameterValueById) throw new Error("Core model parameter API unavailable.");
         core.setParameterValueById(name, Number(value));
         return result(true, "parameter_set", "Parameter set: " + name);
-      } catch (error) {
-        return result(false, "parameter_failed", String(error));
-      }
+      } catch (error) { return result(false, "parameter_failed", String(error)); }
     };
 
-    if (!runtimeReady()) result(false, "runtime_missing", runtimeMessage);
-    window.addEventListener("resize", function() {
-      if (!app || !currentModel) return;
-      const scale = Math.min(app.renderer.width / currentModel.width,
-        app.renderer.height / currentModel.height) * 0.82;
-      currentModel.scale.set(scale);
-      currentModel.position.set(app.renderer.width / 2, app.renderer.height / 2);
+    document.getElementById("fit-model").addEventListener("click", fitModelToView);
+    document.getElementById("center-model").addEventListener("click", centerModel);
+    document.getElementById("reset-view").addEventListener("click", resetView);
+    window.addEventListener("error", function(event) {
+      const text = String(event.error && event.error.stack || event.message || "");
+      if (text.includes("doDrawModel")) {
+        result(false, "render_failed",
+          "Model loaded but not visible. Cubism renderer failed in doDrawModel; check Core/framework compatibility.");
+      }
     });
+    if (!runtimeReady()) result(false, "runtime_missing", runtimeMessage);
+    const queryModel = new URLSearchParams(window.location.search).get("model");
+    if (queryModel) window.loadModel(queryModel);
+    window.addEventListener("resize", function() {
+      if (!app) return;
+      ensurePixiApplication();
+      if (currentModel) fitModelToView();
+    });
+    setInterval(updateDebugPanel, 500);
+    updateDebugPanel();
   </script>
 </body>
 </html>

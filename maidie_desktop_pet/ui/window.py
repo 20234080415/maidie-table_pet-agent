@@ -17,6 +17,7 @@ from ui.about_dialog import AboutDialog
 from ui.fence_overlay import FenceOverlayWindow
 from ui.resize_handle import SubtleResizeHandle
 from ui.coding_agent_console import CodingAgentConsole
+from ui.long_response_panel import LongResponsePanel
 from ui.sprite import HatchPetSprite
 from core.vision.region_selector import RegionSelector
 
@@ -78,6 +79,7 @@ class PetWindow(QWidget):
         self.character = HatchPetSprite(assets_dir / "spritesheet.webp")
         self.chat_input = ChatInput(self)
         self.coding_console = CodingAgentConsole(controller.cancel_coding_agent)
+        self.long_response_panel = LongResponsePanel()
         self.chat_input.submitted.connect(controller.submit_text)
         self.resize_handle = SubtleResizeHandle(self)
         self._handle_visibility_timer = QTimer(self)
@@ -107,11 +109,6 @@ class PetWindow(QWidget):
 
     def _handle_coding_agent_event(self, event: dict) -> None:
         self.coding_console.handle_event(event)
-        if event.get("event") == "start":
-            self.character.set_animation("thinking")
-            self._show_local_message("我去叫 OpenCode 看看项目啦，旁边的小终端会显示进度。")
-        elif event.get("event") == "finish":
-            self.character.set_animation("idle")
 
     def _start_region_selection(self, message: str) -> None:
         if self._shutting_down:
@@ -197,6 +194,14 @@ class PetWindow(QWidget):
 
     def _show_reply(self, response: dict) -> None:
         self.bubble_controller.complete_stream(response)
+        if self.long_response_panel.should_show(response):
+            self.long_response_panel.show_result(
+                str(response.get("panel_title") or "详细结果"),
+                response.get("content") if isinstance(response.get("content"), dict) else {},
+                str(response.get("panel_text") or response.get("full_text") or response.get("text", "")),
+                self.frameGeometry(),
+                self.screen().availableGeometry(),
+            )
 
     def _show_local_message(self, text: str) -> None:
         self.bubble.show_message(text)
@@ -262,8 +267,19 @@ class PetWindow(QWidget):
         self._dialog.exec()
 
     def show_settings(self) -> None:
-        self._dialog = SettingsDialog(self.controller, self)
-        if self._dialog.exec():
+        # Keep settings independent from the always-on-top pet window so it can
+        # move behind other applications and be minimized normally.
+        self._dialog = SettingsDialog(self.controller)
+        app = QApplication.instance()
+        quit_on_last_window = app.quitOnLastWindowClosed() if app else True
+        if app:
+            app.setQuitOnLastWindowClosed(False)
+        try:
+            accepted = self._dialog.exec()
+        finally:
+            if app:
+                app.setQuitOnLastWindowClosed(quit_on_last_window)
+        if accepted:
             self.bubble.show_message("设置已经保存好啦。")
             self._position_overlays()
 
@@ -501,6 +517,8 @@ class PetWindow(QWidget):
                 chosen = candidate
                 break
         self.chat_input.setGeometry(chosen)
+        if self.long_response_panel.isVisible():
+            self.long_response_panel.position_near(pet_rect, screen)
 
     def set_input_manager(self, input_manager) -> None:
         self._input_manager = input_manager
@@ -537,6 +555,7 @@ class PetWindow(QWidget):
         if self.fence_overlay is not None:
             self.fence_overlay.close()
         self.coding_console.close()
+        self.long_response_panel.close()
         self.controller.shutdown()
         self.hide()
         logger.info("Maidie shutdown complete")

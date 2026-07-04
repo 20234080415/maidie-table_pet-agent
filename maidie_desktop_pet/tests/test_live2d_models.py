@@ -3,12 +3,16 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
 from animation.live2d_web import (Live2DWebPreview, resolve_animation_backend,
                                   runtime_status, viewer_root)
 from animation.model_manager import AnimationModelRegistry
+from animation.live2d_preview_server import Live2DPreviewServer, open_browser_preview
 from core.settings import ConfigStore
 from ui.live2d_preview_dialog import build_load_model_script, preview_process_arguments
 
@@ -91,6 +95,29 @@ class AnimationModelRegistryTests(unittest.TestCase):
         self.assertIn("window.setExpression", html)
         self.assertIn("window.setParameter", html)
         self.assertIn("window.getPreviewState", html)
+        self.assertIn("new URLSearchParams(window.location.search).get(\"model\")", html)
+        self.assertIn("Model URL:", html)
+        self.assertIn("new URL(String(value || \"\").replace", html)
+        self.assertIn("Live2D model preflight failed", html)
+        self.assertIn("HTTP status:", html)
+        self.assertIn("Request URL:", html)
+        self.assertIn('id="live2d-canvas-container"', html)
+        self.assertIn("Fit Model To View", html)
+        self.assertIn("Center Model", html)
+        self.assertIn("Reset View", html)
+        self.assertIn("Stage children count:", html)
+        self.assertIn("Canvas size:", html)
+        self.assertIn("Model bounds:", html)
+        self.assertIn("app.stage.addChild(currentModel)", html)
+        self.assertIn("function fitModelToView()", html)
+        self.assertIn("function centerModel()", html)
+        self.assertIn("currentModel.visible = true", html)
+        self.assertIn("currentModel.alpha = 1", html)
+        self.assertIn("app.ticker.start()", html)
+        self.assertIn("Model loaded but not visible", html)
+        self.assertIn("Cubism Core version:", html)
+        self.assertIn("runtime_incompatible", html)
+        self.assertIn("doDrawModel", html)
         self.assertIn("Live2D runtime files are missing", html)
         empty_runtime = self.root / "empty-viewer"
         empty_runtime.mkdir()
@@ -145,6 +172,136 @@ class AnimationModelRegistryTests(unittest.TestCase):
         dialog, result = create_live2d_preview_dialog(None)
         self.assertIsNone(dialog)
         self.assertEqual(result["code"], "model_not_selected")
+
+    def test_browser_preview_server_is_loopback_and_maps_only_allowed_roots(self):
+        model_path = self._model_file("A/a.model3.json")
+        (model_path.parent / "texture.png").write_bytes(b"texture")
+        viewer = self.root / "viewer"
+        viewer.mkdir()
+        (viewer / "index.html").write_text("viewer", encoding="utf-8")
+        model = AnimationModelRegistry().import_model3_json(model_path, root=self.root)
+        server = Live2DPreviewServer(model, viewer=viewer)
+        try:
+            url = server.start()
+            self.assertEqual(server._httpd.server_address[0], "127.0.0.1")
+            self.assertIn("/viewer/index.html?model=/model/", url)
+            self.assertEqual(urllib.request.urlopen(
+                f"http://127.0.0.1:{server.port}/viewer/index.html"
+            ).read(), b"viewer")
+            self.assertEqual(urllib.request.urlopen(
+                f"http://127.0.0.1:{server.port}/model/{model.id}/texture.png"
+            ).read(), b"texture")
+            for path in ("/viewer/../outside.txt", "/model/%2e%2e/outside.txt",
+                         f"/model/{model.id}/%2e%2e/outside.txt"):
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(f"http://127.0.0.1:{server.port}{path}")
+                self.assertEqual(caught.exception.code, 403)
+        finally:
+            server.stop()
+
+    def test_runtime_model_url_and_all_relative_resources_are_served(self):
+        model_path = self._model_file("Hibiki/runtime/hibiki.model3.json")
+        resources = {
+            "hibiki.moc3": b"moc3",
+            "textures/texture_00.png": b"texture",
+            "motions/idle.motion3.json": b"{}",
+            "hibiki.physics3.json": b"{}",
+            "expressions/smile.exp3.json": b"{}",
+        }
+        for relative, content in resources.items():
+            resource = model_path.parent / relative
+            resource.parent.mkdir(parents=True, exist_ok=True)
+            resource.write_bytes(content)
+        viewer = self.root / "viewer"
+        viewer.mkdir()
+        (viewer / "index.html").write_text("viewer", encoding="utf-8")
+        model = AnimationModelRegistry().import_model3_json(model_path, root=self.root)
+        self.assertEqual(model.metadata["relative_path"], "Hibiki/runtime/hibiki.model3.json")
+        server = Live2DPreviewServer(model, viewer=viewer)
+        try:
+            preview_url = server.start()
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(preview_url).query)
+            model_url = query["model"][0]
+            self.assertEqual(model_url, f"/model/{model.id}/hibiki.model3.json")
+            base = f"http://127.0.0.1:{server.port}/model/{model.id}/"
+            self.assertEqual(urllib.request.urlopen(base + "hibiki.model3.json").status, 200)
+            for relative, content in resources.items():
+                response = urllib.request.urlopen(base + relative)
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.read(), content)
+            successful = [entry for entry in server.request_log if entry["status"] == 200]
+            self.assertTrue(all(entry["allowed_root"] == str(model_path.parent.resolve())
+                                for entry in successful))
+        finally:
+            server.stop()
+
+    def test_missing_resource_error_contains_http_mapping_diagnostics(self):
+        model_path = self._model_file("Hibiki/runtime/hibiki.model3.json")
+        viewer = self.root / "viewer"
+        viewer.mkdir()
+        (viewer / "index.html").write_text("viewer", encoding="utf-8")
+        model = AnimationModelRegistry().import_model3_json(model_path, root=self.root)
+        server = Live2DPreviewServer(model, viewer=viewer)
+        try:
+            server.start()
+            url = (f"http://127.0.0.1:{server.port}/model/{model.id}/"
+                   "textures/missing.png")
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(url)
+            payload = json.loads(caught.exception.read().decode("utf-8"))
+            self.assertEqual(payload["status"], 404)
+            self.assertEqual(payload["request_path"],
+                             f"/model/{model.id}/textures/missing.png")
+            self.assertEqual(payload["resolved_path"],
+                             str((model_path.parent / "textures/missing.png").resolve()))
+            self.assertEqual(payload["allowed_root"], str(model_path.parent.resolve()))
+        finally:
+            server.stop()
+
+    def test_deleted_model_entry_returns_structured_error(self):
+        model_path = self._model_file("A/a.model3.json")
+        viewer = self.root / "viewer"
+        viewer.mkdir()
+        (viewer / "index.html").write_text("viewer", encoding="utf-8")
+        model = AnimationModelRegistry().import_model3_json(model_path, root=self.root)
+        server = Live2DPreviewServer(model, viewer=viewer)
+        try:
+            server.start()
+            model_path.unlink()
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(
+                    f"http://127.0.0.1:{server.port}/model/{model.id}/{model_path.name}"
+                )
+            payload = json.loads(caught.exception.read().decode("utf-8"))
+            self.assertEqual(payload["code"], "model3_json_missing")
+        finally:
+            server.stop()
+
+    def test_missing_model_entry_fails_with_structured_error(self):
+        model_path = self._model_file("A/a.model3.json")
+        model = AnimationModelRegistry().import_model3_json(model_path, root=self.root)
+        model_path.unlink()
+        server, result = open_browser_preview(model)
+        self.assertIsNone(server)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["code"], "model3_json_missing")
+
+    def test_browser_preview_does_not_change_backend(self):
+        model = AnimationModelRegistry().import_model3_json(
+            self._model_file("A/a.model3.json"), root=self.root
+        )
+        with patch("animation.live2d_preview_server.viewer_root") as root, \
+                patch("animation.live2d_preview_server.webbrowser.open") as browser:
+            viewer = self.root / "viewer"
+            viewer.mkdir()
+            (viewer / "index.html").write_text("viewer", encoding="utf-8")
+            root.return_value = viewer
+            server, result = open_browser_preview(model)
+            self.assertTrue(result["ok"])
+            self.assertEqual(model.backend, "live2d_web")
+            self.assertNotIn("backend", result)
+            if server is not None:
+                server.stop()
 
 
 class AnimationConfigTests(unittest.TestCase):

@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QLabel, QMessageBox
 
 from core.version import (
@@ -73,6 +74,13 @@ class HelpAndAboutPageTests(unittest.TestCase):
         self.assertNotIn("关于 Maidie", labels)
         self.assertIn("模型与 API", labels)
         self.assertIn("工作区 / Coding Agent", labels)
+        dialog.close()
+
+    def test_settings_dialog_is_not_always_on_top_and_can_minimize(self):
+        dialog = SettingsDialog(_Controller())
+        flags = dialog.windowFlags()
+        self.assertFalse(flags & Qt.WindowType.WindowStaysOnTopHint)
+        self.assertTrue(flags & Qt.WindowType.WindowMinimizeButtonHint)
         dialog.close()
 
     def test_coding_agent_settings_are_read_only_and_testable(self):

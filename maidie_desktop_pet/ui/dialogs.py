@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 
 from core.settings import PERSONALITY_PRESETS
 from animation.live2d_web import Live2DWebPreview
+from animation.live2d_preview_server import open_browser_preview
 from animation.model_manager import AnimationModelRegistry
 from ui.live2d_preview_dialog import create_live2d_preview_dialog
 from core.tools.coding_agent_tool import CodingAgentTool
@@ -167,7 +168,12 @@ class SettingsDialog(QDialog):
         )
         self.live2d_preview = Live2DWebPreview()
         self._live2d_preview_windows: list[QDialog] = []
+        self._live2d_preview_servers: list[object] = []
         self.setWindowTitle("Maidie 设置")
+        flags = self.windowFlags()
+        flags &= ~Qt.WindowType.WindowStaysOnTopHint
+        flags |= Qt.WindowType.WindowMinimizeButtonHint
+        self.setWindowFlags(flags)
         self.resize(720, 540)
         self.setStyleSheet(BASE_STYLE)
 
@@ -349,6 +355,9 @@ class SettingsDialog(QDialog):
         preview_button = QPushButton("预览模型")
         preview_button.setObjectName("previewLive2DModelButton")
         preview_button.clicked.connect(self._preview_live2d_model)
+        browser_preview_button = QPushButton("用浏览器预览")
+        browser_preview_button.setObjectName("browserPreviewLive2DModelButton")
+        browser_preview_button.clicked.connect(self._preview_live2d_model_in_browser)
         sprite_button = QPushButton("回退 Sprite")
         sprite_button.clicked.connect(self._fallback_to_sprite)
         action_row = QWidget()
@@ -356,6 +365,7 @@ class SettingsDialog(QDialog):
         action_layout.setContentsMargins(0, 0, 0, 0)
         action_layout.addWidget(apply_button)
         action_layout.addWidget(preview_button)
+        action_layout.addWidget(browser_preview_button)
         action_layout.addWidget(sprite_button)
 
         self.live2d_preview_label = QLabel()
@@ -484,14 +494,34 @@ class SettingsDialog(QDialog):
         model = next((item for item in self.live2d_registry.list_models()
                       if item.id == model_id), None)
         dialog, result = create_live2d_preview_dialog(model, self)
-        self.live2d_preview_label.setText(str(result.get("message", "预览不可用。")))
+        message = str(result.get("message", "预览不可用。"))
+        if result.get("code") == "webengine_missing":
+            message += " 可使用浏览器预览继续验证 Live2D 模型。"
+        self.live2d_preview_label.setText(message)
         if dialog is None:
             return
         self._live2d_preview_windows.append(dialog)
+        dialog.status_changed.connect(self._show_live2d_process_status)
         dialog.finished.connect(
             lambda _value, window=dialog: self._forget_live2d_preview(window)
         )
         dialog.show()
+
+    def _show_live2d_process_status(self, payload: object) -> None:
+        result = payload if isinstance(payload, dict) else {}
+        self.live2d_preview_label.setText(str(result.get("message", "预览不可用。")))
+
+    def _preview_live2d_model_in_browser(self) -> None:
+        model_id = str(self.live2d_model.currentData() or "")
+        model = next((item for item in self.live2d_registry.list_models()
+                      if item.id == model_id), None)
+        if model is None:
+            self.live2d_preview_label.setText("未选择有效的 Live2D 模型。")
+            return
+        server, result = open_browser_preview(model)
+        self.live2d_preview_label.setText(str(result.get("message", "浏览器预览不可用。")))
+        if server is not None:
+            self._live2d_preview_servers.append(server)
 
     def _forget_live2d_preview(self, dialog: QDialog) -> None:
         if dialog in self._live2d_preview_windows:

@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QProcess, QUrl
+from PyQt6.QtCore import QProcess, QUrl, pyqtSignal
 from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from animation.live2d_web import Live2DPreviewStatus, Live2DWebPreview
@@ -27,6 +27,8 @@ def preview_process_arguments(model: AnimationModel) -> list[str]:
 
 class Live2DPreviewDialog(QDialog):
     """Status/control dialog for a crash-isolated WebEngine preview process."""
+
+    status_changed = pyqtSignal(object)
 
     def __init__(self, model: AnimationModel, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -109,6 +111,7 @@ class Live2DPreviewDialog(QDialog):
             self.model.name, self.model.model3_json, code or "preview_unknown", payload,
         )
         self.status_label.setText(self.preview_status.message)
+        self.status_changed.emit(self.preview_status.to_dict())
 
     def _on_process_error(self, _error: QProcess.ProcessError) -> None:
         self.preview_status = Live2DPreviewStatus(
@@ -116,11 +119,12 @@ class Live2DPreviewDialog(QDialog):
             self.model.name, self.model.model3_json, "preview_process_error",
         )
         self.status_label.setText(self.preview_status.message)
+        self.status_changed.emit(self.preview_status.to_dict())
 
     def _on_process_finished(self, exit_code: int, status: QProcess.ExitStatus) -> None:
         if status == QProcess.ExitStatus.CrashExit:
             message = (
-                "Live2D WebEngine 预览进程发生原生崩溃；已隔离，Sprite 主程序不受影响。"
+                "内嵌预览在当前环境崩溃，可使用浏览器预览继续验证 Live2D 模型。"
             )
             code = "preview_process_crashed"
         elif exit_code and self.preview_status.code not in {
@@ -135,6 +139,7 @@ class Live2DPreviewDialog(QDialog):
             {"exit_code": exit_code},
         )
         self.status_label.setText(message)
+        self.status_changed.emit(self.preview_status.to_dict())
 
     def closeEvent(self, event) -> None:
         if self.process is not None and self.process.state() != QProcess.ProcessState.NotRunning:

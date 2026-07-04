@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -71,15 +72,37 @@ class CodingAgentInstallerTests(unittest.TestCase):
             (Path(root) / "AGENTS.md").write_text("rules", encoding="utf-8")
             self.assertTrue(installer.detect_setup_status(root)["agents_md"])
 
+    @patch("core.tools.coding_agent_installer.shutil.which", return_value="C:/Windows/wt.exe")
     @patch("core.tools.coding_agent_installer.subprocess.Popen")
-    def test_visible_terminal_uses_workspace_and_shell_false(self, popen):
+    def test_visible_terminal_uses_windows_terminal_utf8_and_shell_false(self, popen, _which):
         popen.return_value = Mock(pid=1)
         installer = CodingAgentInstaller(); installer.detect_opencode = Mock(return_value="opencode")
         with tempfile.TemporaryDirectory() as root:
             result = installer.open_visible_terminal(root)
         self.assertTrue(result["ok"])
+        self.assertEqual(result["terminal"], "windows_terminal")
         self.assertIs(popen.call_args.kwargs["shell"], False)
         self.assertEqual(Path(popen.call_args.kwargs["cwd"]), Path(root).resolve())
+        args = popen.call_args.args[0]
+        self.assertEqual(args[0], "C:/Windows/wt.exe")
+        self.assertIn("--startingDirectory", args)
+        self.assertIn("chcp 65001>nul && opencode", args)
+        self.assertEqual(popen.call_args.kwargs["creationflags"], 0)
+
+    @patch("core.tools.coding_agent_installer.shutil.which", return_value=None)
+    @patch("core.tools.coding_agent_installer.subprocess.Popen")
+    def test_visible_terminal_falls_back_to_utf8_cmd(self, popen, _which):
+        popen.return_value = Mock(pid=2)
+        installer = CodingAgentInstaller(); installer.detect_opencode = Mock(return_value="opencode")
+        with tempfile.TemporaryDirectory() as root:
+            result = installer.open_visible_terminal(root)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["terminal"], "cmd")
+        args = popen.call_args.args[0]
+        self.assertEqual(args[:4], ["cmd.exe", "/d", "/k", "chcp 65001>nul && opencode"])
+        self.assertEqual(
+            popen.call_args.kwargs["creationflags"], subprocess.CREATE_NEW_CONSOLE
+        )
 
 
 if __name__ == "__main__":

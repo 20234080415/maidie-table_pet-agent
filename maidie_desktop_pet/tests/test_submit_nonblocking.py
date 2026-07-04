@@ -47,6 +47,17 @@ class SubmitResponsivenessTests(unittest.TestCase):
         router.classify.assert_not_called()
         controller.shutdown()
 
+    def test_busy_request_gets_feedback_instead_of_being_silently_dropped(self):
+        controller = PetController(Mock(), _Memory())
+        messages = []
+        controller.local_message_requested.connect(messages.append)
+        controller.ai_session.busy = True
+
+        controller.submit_text("还有多久")
+
+        self.assertEqual(messages, ["我还在分析上一个任务，完成后再告诉我吧。"])
+        controller.shutdown()
+
 
 if __name__ == "__main__":
     unittest.main()

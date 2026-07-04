@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import subprocess
 import threading
 from collections import deque
@@ -11,6 +12,7 @@ from typing import Any, Callable
 
 class CodingAgentProcessRunner:
     SETUP_WORDS = ("api key", "provider", "login", "connect", "auth", "configure", "model")
+    ANSI_ESCAPE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 
     def __init__(self, max_lines: int = 200) -> None:
         self.max_lines = max(1, int(max_lines))
@@ -19,7 +21,7 @@ class CodingAgentProcessRunner:
         self._lock = threading.Lock()
 
     def run(self, args: list[str], cwd: str, *, input_text: str | None = None,
-            timeout: float = 120, idle_timeout: float = 30,
+            timeout: float = 120, idle_timeout: float | None = 30,
             env: dict[str, str] | None = None,
             on_start: Callable[[dict[str, Any]], None] | None = None,
             on_output_line: Callable[[dict[str, Any]], None] | None = None,
@@ -68,6 +70,7 @@ class CodingAgentProcessRunner:
                     if line is None:
                         closed += 1
                     else:
+                        line = self.ANSI_ESCAPE.sub("", line).replace("\r", "")
                         last_output = monotonic()
                         tagged = f"[{stream_name}] {line}"
                         all_lines.append(tagged)
@@ -86,7 +89,7 @@ class CodingAgentProcessRunner:
                     status = "timeout"
                     killed = self._terminate_tree(process.pid)
                     break
-                if now - last_output >= idle_timeout:
+                if idle_timeout is not None and now - last_output >= idle_timeout:
                     status = "idle_timeout"
                     killed = self._terminate_tree(process.pid)
                     break

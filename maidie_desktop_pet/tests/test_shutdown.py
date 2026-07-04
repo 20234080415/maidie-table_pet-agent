@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -84,6 +84,24 @@ class ShutdownTests(unittest.TestCase):
             self.assertIn(label, actions)
         self.assertNotIn("模型设置", actions)
         self.assertFalse(actions["检查更新"].isEnabled())
+        window.shutdown()
+        window.close()
+
+    def test_cancelling_independent_settings_does_not_quit_application(self):
+        controller = self.make_controller()
+        window = PetWindow(controller, self.assets)
+        observed = []
+        dialog = Mock()
+        dialog.exec.side_effect = lambda: observed.append(
+            self.app.quitOnLastWindowClosed()
+        ) or 0
+
+        self.app.setQuitOnLastWindowClosed(True)
+        with patch("ui.window.SettingsDialog", return_value=dialog):
+            window.show_settings()
+
+        self.assertEqual(observed, [False])
+        self.assertTrue(self.app.quitOnLastWindowClosed())
         window.shutdown()
         window.close()
 

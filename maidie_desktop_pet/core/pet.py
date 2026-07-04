@@ -515,6 +515,10 @@ class PetController(QObject):
     def submit_text(self, message: str, proactive: bool = False) -> None:
         if getattr(self, "_shutting_down", False):
             return
+        if self.ai_session.busy:
+            if not proactive:
+                self.local_message_requested.emit("我还在分析上一个任务，完成后再告诉我吧。")
+            return
         if not proactive and detect_vision_scope(message) is VisionScope.SELECTED_REGION:
             if not self.ai_session.busy:
                 self.local_message_requested.emit("好，你框一下要我看的地方就行。")
@@ -608,7 +612,7 @@ class PetController(QObject):
     def _complete_stream_response(self) -> None:
         self.ai_session.complete_stream_response()
 
-    def _on_ai_response_completed(self, message: str, response: dict[str, str],
+    def _on_ai_response_completed(self, message: str, response: dict[str, Any],
                                   pending_reaction: str | None) -> None:
         if pending_reaction:
             animation = pending_reaction
@@ -637,8 +641,9 @@ class PetController(QObject):
             QTimer.singleShot(900, lambda: self._recover_if_current(token))
         self.message_received.emit(response)
         internal_event = bool(self.ai_session.pending_proactive)
+        stored_response = str(response.get("full_text") or response["text"])
         if not internal_event:
-            self.memory.save(message, response["text"])
+            self.memory.save(message, stored_response)
         should_extract = self._should_extract_memory(message, response)
         if (
             should_extract and not internal_event
@@ -652,7 +657,7 @@ class PetController(QObject):
             self._memory_executor.submit(
                 self._extract_and_store_memories,
                 message,
-                response["text"],
+                stored_response,
             )
         elif not should_extract:
             try:

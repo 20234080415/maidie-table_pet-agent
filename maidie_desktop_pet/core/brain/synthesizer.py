@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 
 from ai.client import normalize_response
 from core.brain.fast_route import is_simple_time_query, is_simple_weather_query
+from core.formatters import CodingAnalysisFormatter
 from core.performance import mark
 from core.personality import MaidieStyle
 from core.prompts.synthesizer import build_synthesizer_prompt
@@ -13,18 +15,21 @@ class Synthesizer:
     """The only V4 layer allowed to turn facts into words for the user."""
 
     def __init__(self, chat_client: Any, codex_client: Any | None = None,
-                 style: MaidieStyle | None = None, personality_prompt: str = "") -> None:
+                 style: MaidieStyle | None = None, personality_prompt: str = "",
+                 coding_formatter: CodingAnalysisFormatter | None = None) -> None:
         self.chat_client = chat_client
         self.codex_client = codex_client or chat_client
         self.style = style or MaidieStyle()
         self.personality_prompt = personality_prompt
+        self.coding_formatter = coding_formatter or CodingAnalysisFormatter()
 
     def synthesize(self, user_input: str, source: str, plan: dict[str, Any] | None,
                    tool_data: list[dict[str, Any]], memory_context: str,
                    context: list[dict[str, Any]], on_delta: Callable[[str], None] | None = None,
-                   technical: bool = False) -> dict[str, str]:
+                   technical: bool = False) -> dict[str, Any]:
         client = self.codex_client if technical else self.chat_client
         prompt = self._prompt(user_input, source, plan, tool_data, memory_context)
+        display: dict[str, Any] = {}
         if source == "clarification":
             mark(local_response_used=True)
             normalized = {"text": "你是想让我看屏幕吗？可以说‘看当前窗口’、‘看全屏’、‘看鼠标这块’，或者‘我框选一下’。",
@@ -43,6 +48,11 @@ class Synthesizer:
                           for item in tool_data)):
             mark(local_response_used=True)
             normalized = self._local_fallback(source, tool_data)
+        elif self._successful_coding_result(tool_data) is not None:
+            mark(local_response_used=True)
+            normalized, display = self._coding_analysis_response(
+                user_input, source, tool_data, context, client
+            )
         elif any(item.get("tool") == "coding_agent" for item in tool_data):
             mark(local_response_used=True)
             normalized = self._local_fallback(source, tool_data)
@@ -64,9 +74,103 @@ class Synthesizer:
                               "emotion": "thinking", "action": "talk", "state": "talking"}
         normalized["text"] = self.style.preserve(normalized.get("text", ""))
         result = self.style.normalize_fields(normalized, source)
+        if display:
+            result.update(display)
+        elif self._needs_long_panel(result["text"], tool_data):
+            full_text = result["text"]
+            result.update({
+                "display_type": self._display_type(tool_data),
+                "short_text": self._short_text(full_text),
+                "panel_title": self._panel_title(tool_data),
+                "panel_text": full_text,
+                "content": {},
+                "full_text": full_text,
+            })
+            result["text"] = result["short_text"]
         if on_delta:
             on_delta(result["text"])
         return result
+
+    @staticmethod
+    def _successful_coding_result(
+        tool_data: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        item = next(
+            (entry for entry in tool_data
+             if entry.get("tool") == "coding_agent" and entry.get("ok")),
+            None,
+        )
+        if not item:
+            return None
+        data = item.get("data", {})
+        return data if isinstance(data, dict) else None
+
+    def _coding_analysis_response(
+        self, user_input: str, source: str, tool_data: list[dict[str, Any]],
+        context: list[dict[str, Any]], client: Any,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        data = self._successful_coding_result(tool_data) or {}
+        raw = data.get("raw") or data
+        content = self.coding_formatter.format(raw)
+        panel_text = self.coding_formatter.to_plain_text(content)
+        short_text = "分析已经完成，重点内容已整理到结果卡片中。"
+        if self._client_ready(client):
+            short_prompt = (
+                self.style.prompt(self.personality_prompt)
+                + "\n请根据当前人格、对话语气和上下文，用一句不超过45字的自然中文告诉用户："
+                  "项目只读分析已完成，详细重点已放在结果卡片中。"
+                  "不要复述分析内容，不要输出JSON或Markdown。"
+                + f"\n用户请求：{user_input}"
+            )
+            try:
+                generated = normalize_response(client.ask(short_prompt, context), source)
+                candidate = str(generated.get("text") or "").strip()
+                if candidate and "{" not in candidate and len(candidate) <= 80:
+                    short_text = candidate
+            except Exception:
+                pass
+        return (
+            {"text": short_text, "emotion": "thinking", "action": "talk",
+             "state": "talking", "source": source},
+            {"display_type": "coding_analysis", "short_text": short_text,
+             "panel_title": "项目分析结果", "content": content,
+             "panel_text": panel_text, "full_text": panel_text},
+        )
+
+    @staticmethod
+    def _needs_long_panel(text: str, tool_data: list[dict[str, Any]]) -> bool:
+        value = str(text or "")
+        list_lines = sum(
+            1 for line in value.splitlines()
+            if re.match(r"\s*(?:[-*•]|\d+[.)、])\s*", line)
+        )
+        explicit_tool = any(
+            item.get("tool") in {"search", "coding_agent"} and item.get("ok")
+            for item in tool_data
+        )
+        return len(value) > 160 or list_lines >= 2 or explicit_tool
+
+    @staticmethod
+    def _short_text(text: str) -> str:
+        value = str(text or "").strip()
+        first = re.split(r"(?<=[。！？!?])", value, maxsplit=1)[0].strip()
+        if not first:
+            first = value
+        return first if len(first) <= 90 else first[:87].rstrip() + "…"
+
+    @staticmethod
+    def _display_type(tool_data: list[dict[str, Any]]) -> str:
+        tools = {str(item.get("tool", "")) for item in tool_data if item.get("ok")}
+        if "search" in tools:
+            return "search_result"
+        if tools:
+            return "tool_result"
+        return "long_response"
+
+    @staticmethod
+    def _panel_title(tool_data: list[dict[str, Any]]) -> str:
+        tools = {str(item.get("tool", "")) for item in tool_data if item.get("ok")}
+        return "搜索结果" if "search" in tools else "详细结果"
 
     @staticmethod
     def should_use_local_tool_response(user_input: str,
@@ -177,7 +281,7 @@ class Synthesizer:
             elif kind == "search":
                 text = str(raw.get("summary") or raw.get("error") or "暂时没查到可靠资料。")
             elif kind == "coding_agent":
-                summary = str(raw.get("summary") or "只读分析已完成。")
+                summary = str(raw.get("summary") or "只读分析已完成。").strip()
                 findings = raw.get("findings") if isinstance(raw.get("findings"), list) else []
                 changes = (raw.get("suggested_changes")
                            if isinstance(raw.get("suggested_changes"), list) else [])
@@ -185,11 +289,11 @@ class Synthesizer:
                          if isinstance(raw.get("tests_suggested"), list) else [])
                 parts = [summary]
                 if findings:
-                    parts.append("发现：" + "；".join(map(str, findings)))
+                    parts.append("主要发现：\n- " + "\n- ".join(map(str, findings[:3])))
                 if changes:
-                    parts.append("建议：" + "；".join(map(str, changes)))
+                    parts.append("优先建议：\n- " + "\n- ".join(map(str, changes[:2])))
                 if tests:
-                    parts.append("测试建议：" + "；".join(map(str, tests)))
+                    parts.append("验证建议：" + str(tests[0]))
                 text = "\n".join(parts)
             else:
                 text = "我已经记下相关情况啦。"

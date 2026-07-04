@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -105,7 +106,11 @@ class CodingAgentTool(Tool):
         args, input_text, env = self._command(provider, executable, prompt)
         process_result = self.runner.run(
             args, str(root), input_text=input_text, timeout=timeout,
-            idle_timeout=max(5, min(120, int(self.options.get("idle_timeout_seconds", 30)))),
+            # OpenCode can spend a long time reading files without emitting a
+            # complete line. Its total timeout still applies, but line silence
+            # must not be treated as a hung process.
+            idle_timeout=(None if provider == "opencode" else
+                          max(5, min(120, int(self.options.get("idle_timeout_seconds", 30))))),
             env=env, on_start=self.callbacks.get("on_start"),
             on_output_line=self.callbacks.get("on_output_line"),
             on_status_change=self.callbacks.get("on_status_change"),
@@ -148,6 +153,8 @@ class CodingAgentTool(Tool):
             "permission": {"edit": "deny", "bash": "deny", "webfetch": "deny",
                            "external_directory": "deny"}
         })
+        env["NO_COLOR"] = "1"
+        env["FORCE_COLOR"] = "0"
         return [executable, "run", prompt], None, env
 
     @staticmethod
@@ -173,6 +180,9 @@ class CodingAgentTool(Tool):
     @staticmethod
     def _merge_output(raw: dict[str, Any], stdout: str) -> None:
         output = (stdout or "").strip()
+        fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", output, re.IGNORECASE | re.DOTALL)
+        if fenced:
+            output = fenced.group(1).strip()
         try:
             parsed = json.loads(output)
         except (TypeError, json.JSONDecodeError):

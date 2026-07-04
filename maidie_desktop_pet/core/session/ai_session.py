@@ -45,7 +45,7 @@ class AISessionCoordinator(QObject):
         self.pending_message = ""
         self.pending_source = "chat"
         self.pending_reaction: str | None = None
-        self.pending_response: dict[str, str] | None = None
+        self.pending_response: dict[str, Any] | None = None
         self.pending_proactive = False
         self.future: Any | None = None
         self.request_id = ""
@@ -141,6 +141,12 @@ class AISessionCoordinator(QObject):
             "state": str(result.get("state", "talking")),
             "source": str(result.get("source", "chat")),
         }
+        for key in (
+            "display_type", "short_text", "panel_title", "content",
+            "panel_text", "full_text",
+        ):
+            if key in result:
+                response[key] = result[key]
         self.pending_response = response
         self.result_received(response, failed, error_message)
         if failed or not self.streamer.received_text:

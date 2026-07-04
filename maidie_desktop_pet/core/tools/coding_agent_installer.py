@@ -62,13 +62,30 @@ class CodingAgentInstaller:
             return {"ok": False, "error": "未检测到 OpenCode"}
         try:
             if os.name == "nt":
+                utf8_command = (
+                    "chcp 65001>nul && " + subprocess.list2cmdline([executable])
+                )
+                windows_terminal = shutil.which("wt.exe") or shutil.which("wt")
+                if windows_terminal:
+                    args = [
+                        windows_terminal, "-w", "new", "new-tab",
+                        "--startingDirectory", str(root),
+                        "cmd.exe", "/d", "/k", utf8_command,
+                    ]
+                    creationflags = 0
+                    terminal = "windows_terminal"
+                else:
+                    args = ["cmd.exe", "/d", "/k", utf8_command]
+                    creationflags = subprocess.CREATE_NEW_CONSOLE
+                    terminal = "cmd"
                 process = subprocess.Popen(
-                    ["cmd.exe", "/k", executable], cwd=str(root), shell=False,
-                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+                    args, cwd=str(root), shell=False,
+                    creationflags=creationflags,
                 )
             else:
                 process = subprocess.Popen([executable], cwd=str(root), shell=False)
-            return {"ok": True, "pid": process.pid}
+                terminal = "default"
+            return {"ok": True, "pid": process.pid, "terminal": terminal}
         except OSError as exc:
             return {"ok": False, "error": str(exc)}
 

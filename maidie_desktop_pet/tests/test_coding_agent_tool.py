@@ -69,12 +69,14 @@ class CodingAgentToolTests(unittest.TestCase):
             CodingAgentTool._command("opencode", "opencode", "prompt")
             tool.run("分析项目")
             self.assertEqual(Path(tool.runner.run.call_args.args[1]), Path(root).resolve())
+            self.assertIsNone(tool.runner.run.call_args.kwargs["idle_timeout"])
             permissions = json.loads(
                 tool.runner.run.call_args.kwargs["env"]["OPENCODE_CONFIG_CONTENT"]
             )["permission"]
             self.assertEqual(permissions["external_directory"], "deny")
             self.assertEqual(permissions["edit"], "deny")
             self.assertEqual(permissions["bash"], "deny")
+            self.assertEqual(tool.runner.run.call_args.kwargs["env"]["NO_COLOR"], "1")
 
     @patch("core.tools.coding_agent_tool.shutil.which", return_value="codex")
     def test_codex_is_forced_into_read_only_sandbox(self, _which):
@@ -109,6 +111,17 @@ class CodingAgentToolTests(unittest.TestCase):
             tool.run("生成 patch", "propose_patch")
             self.assertEqual(marker.read_text(encoding="utf-8"), "before")
             self.assertEqual(list(Path(root).iterdir()), [marker])
+
+    def test_fenced_json_output_is_parsed_as_structured_analysis(self):
+        raw = CodingAgentTool()._raw("analyze_project")
+        CodingAgentTool._merge_output(
+            raw,
+            '```json\n{"summary":"完成","findings":["问题"],'
+            '"suggested_changes":["建议"],"tests_suggested":["测试"]}\n```',
+        )
+        self.assertEqual(raw["summary"], "完成")
+        self.assertEqual(raw["findings"], ["问题"])
+        self.assertNotIn("```", raw["summary"])
 
     def test_executor_allows_registered_coding_agent(self):
         with tempfile.TemporaryDirectory() as root:

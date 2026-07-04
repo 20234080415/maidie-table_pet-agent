@@ -24,6 +24,26 @@ class CodingAgentProcessTests(unittest.TestCase):
         self.assertIn("err", result["stderr_tail"])
         self.assertEqual({item["stream"] for item in events}, {"stdout", "stderr"})
 
+    def test_ansi_terminal_codes_are_removed_from_output(self):
+        events = []
+        with tempfile.TemporaryDirectory() as root:
+            result = CodingAgentProcessRunner().run(
+                [sys.executable, "-c",
+                 "import sys; sys.stdout.buffer.write('\\033[31m分析完成\\033[0m\\n'.encode('utf-8'))"],
+                root, timeout=5, idle_timeout=2, on_output_line=events.append,
+            )
+        self.assertEqual(result["stdout_tail"], "分析完成")
+        self.assertEqual(events[0]["line"], "分析完成")
+
+    def test_idle_timeout_can_be_disabled_for_quiet_tui_work(self):
+        with tempfile.TemporaryDirectory() as root:
+            result = CodingAgentProcessRunner().run(
+                [sys.executable, "-c", "import time; time.sleep(.3); print('done')"],
+                root, timeout=2, idle_timeout=None,
+            )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["stdout_tail"], "done")
+
     def test_idle_timeout_kills_process_tree(self):
         with tempfile.TemporaryDirectory() as root:
             result = CodingAgentProcessRunner().run(

@@ -9,6 +9,15 @@ class OfflineClient:
     api_key = ""
 
 
+class PersonaClient:
+    api_key = "configured"
+
+    def ask(self, prompt, _context):
+        self.prompt = prompt
+        return {"text": "已经检查完了，详细重点在旁边的卡片里。",
+                "emotion": "idle", "action": "talk", "state": "talking"}
+
+
 class SynthesizerTimeDeltaTests(unittest.TestCase):
     def test_structured_delta_response_uses_all_facts(self):
         synthesizer = Synthesizer(OfflineClient())
@@ -33,8 +42,41 @@ class SynthesizerTimeDeltaTests(unittest.TestCase):
             "分析我的项目", "code_task", None,
             [{"tool": "coding_agent", "ok": True, "data": data}], "", [],
         )
-        for expected in ["项目分析完成", "入口过重", "拆分协调逻辑", "增加路由测试"]:
-            self.assertIn(expected, result["text"])
+        self.assertEqual(result["display_type"], "coding_analysis")
+        self.assertIn("项目分析完成", result["content"]["project_overview"])
+        self.assertEqual(result["content"]["key_findings"], ["入口过重"])
+        self.assertEqual(result["content"]["priority_suggestions"], ["拆分协调逻辑"])
+        self.assertEqual(result["content"]["validation_suggestions"], ["增加路由测试"])
+
+    def test_coding_agent_reply_is_concise_and_has_no_raw_json(self):
+        synthesizer = Synthesizer(OfflineClient())
+        data = {"type": "coding_agent", "source": "local_opencode", "raw": {
+            "summary": "分析完成", "findings": ["一", "二", "三", "不应展示"],
+            "suggested_changes": ["建议一", "建议二", "建议三"],
+            "tests_suggested": ["验证一", "验证二"],
+        }}
+        result = synthesizer.synthesize(
+            "分析项目", "code_task", None,
+            [{"tool": "coding_agent", "ok": True, "data": data}], "", [],
+        )
+        self.assertLess(len(result["text"]), len(result["panel_text"]))
+        self.assertIn("优先问题", result["panel_text"])
+        self.assertIn("优先建议", result["panel_text"])
+        self.assertNotIn("{'project_name'", result["panel_text"])
+        self.assertNotIn("```json", result["panel_text"])
+
+    def test_coding_short_text_is_generated_by_persona_aware_synthesizer(self):
+        client = PersonaClient()
+        synthesizer = Synthesizer(client, personality_prompt="保持当前用户选择的表达方式")
+        data = {"type": "coding_agent", "raw": {
+            "project_name": "Demo", "findings": ["入口模块职责过多"],
+        }}
+        result = synthesizer.synthesize(
+            "分析项目", "code_task", None,
+            [{"tool": "coding_agent", "ok": True, "data": data}], "", [],
+        )
+        self.assertIn("详细重点在旁边的卡片里", result["text"])
+        self.assertIn("保持当前用户选择的表达方式", client.prompt)
 
     def test_coding_agent_process_failures_have_actionable_messages(self):
         synthesizer = Synthesizer(OfflineClient())
