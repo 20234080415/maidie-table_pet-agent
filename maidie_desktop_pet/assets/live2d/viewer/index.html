@@ -880,6 +880,70 @@
       }
       const queryModel = new URLSearchParams(window.location.search).get("model");
       if (queryModel) await window.loadModel(queryModel);
+      startCommandPolling();
+    }
+
+    function startCommandPolling() {
+      const params = new URLSearchParams(window.location.search);
+      const sessionId = params.get("session");
+      if (!sessionId) return;
+      const apiUrl = "/api/commands?session=" + encodeURIComponent(sessionId);
+      let pollTimer = null;
+
+      async function executeRemoteCommand(command, args) {
+        if (!currentModel) {
+          return controlResult(false, command, "model_not_loaded", "尚未加载 Live2D 模型，无法执行远程命令。");
+        }
+        switch (command) {
+          case "applySemanticState":
+            return await window.applySemanticState(args[0], args[1]);
+          case "playMotion":
+            return await window.playMotion(args[0]);
+          case "setExpression":
+            return await window.setExpression(args[0]);
+          case "setParameter":
+            return await window.setParameter(args[0], args[1]);
+          case "startMouthTest":
+            return window.startMouthTest();
+          case "stopMouthTest":
+            return window.stopMouthTest();
+          case "setMouseFollow":
+            return window.setMouseFollow(args[0]);
+          case "reset":
+            return window.reset();
+          default:
+            return controlResult(false, command, "unknown_command", "未知远程命令：" + command);
+        }
+      }
+
+      async function pollCommands() {
+        try {
+          const response = await window.__maidieOriginalFetch(apiUrl, {cache: "no-store"});
+          if (!response.ok) {
+            controlResult(false, "command_poll", "poll_failed",
+              "命令轮询失败 HTTP " + response.status);
+            return;
+          }
+          const payload = await response.json();
+          if (!payload.ok || !payload.commands || !payload.commands.length) return;
+          const commands = payload.commands;
+          for (const item of commands) {
+            const applied = await executeRemoteCommand(item.command, item.args || []);
+            if (!applied.ok) {
+              controlResult(false, "executeRemoteCommand", "execution_failed",
+                "命令 " + item.command + "(" + JSON.stringify(item.args) + ") 执行失败：" +
+                applied.message, applied.error || applied.code);
+            }
+          }
+        } catch (error) {
+          controlResult(false, "command_poll", "poll_error", "命令轮询异常：" + String(error));
+        }
+      }
+
+      pollTimer = setInterval(pollCommands, 200);
+      window.__maidieCommandPollTimer = pollTimer;
+      window.__maidieExecuteRemoteCommand = executeRemoteCommand;
+      pollCommands();
     }
 
     if (document.readyState === "loading") {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import isfinite
 from typing import Any
@@ -10,14 +11,14 @@ from animation.model_manager import AnimationModel
 
 @dataclass(frozen=True)
 class Live2DCommand:
-    """A queued Viewer command; it does not imply browser delivery."""
+    """A queued Viewer command; does not imply browser delivery."""
 
     command: str
     args: tuple[Any, ...] = ()
     fallback: bool = False
     error: str = ""
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, submitted: bool = False) -> dict[str, Any]:
         return {
             "ok": True,
             "command": self.command,
@@ -25,7 +26,7 @@ class Live2DCommand:
             "fallback": self.fallback,
             "error": self.error,
             "queued": True,
-            "delivered": False,
+            "delivered": submitted,
         }
 
 
@@ -41,16 +42,18 @@ class Live2DBackend:
         "sleepy", "dragged", "headpat",
     })
 
-    def __init__(self) -> None:
+    def __init__(self, command_sink: Callable[[dict[str, Any]], bool] | None = None) -> None:
         self._commands: deque[Live2DCommand] = deque()
         self._shutdown = False
+        self._command_sink = command_sink
 
     @property
     def pending_commands(self) -> tuple[dict[str, Any], ...]:
         return tuple(command.to_dict() for command in self._commands)
 
     def drain_commands(self) -> list[dict[str, Any]]:
-        commands = [command.to_dict() for command in self._commands]
+        commands = [command.to_dict(submitted=self._command_sink is not None)
+                    for command in self._commands]
         self._commands.clear()
         return commands
 
@@ -64,7 +67,15 @@ class Live2DBackend:
             }
         payload = Live2DCommand(command, tuple(args), fallback, error)
         self._commands.append(payload)
-        return payload.to_dict()
+        result = payload.to_dict(submitted=False)
+        if self._command_sink is not None:
+            try:
+                delivered = self._command_sink(result)
+            except Exception as exc:
+                delivered = False
+                result["error"] = f"command_sink 提交失败: {exc}"
+            result["delivered"] = delivered
+        return result
 
     def load_model(self, model: AnimationModel | dict[str, Any] | str) -> dict[str, Any]:
         if isinstance(model, AnimationModel):

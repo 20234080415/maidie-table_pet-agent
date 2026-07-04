@@ -62,6 +62,41 @@ class Live2DBackendTests(unittest.TestCase):
         self.assertFalse(rejected["ok"])
         self.assertFalse(rejected["queued"])
 
+    def test_without_sink_delivered_is_false(self):
+        result = self.backend.apply_state("confused")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["queued"])
+        self.assertFalse(result["delivered"])
+
+    def test_with_sink_commands_are_submitted_and_delivered(self):
+        captured = []
+        backend = Live2DBackend(command_sink=lambda cmd: captured.append(cmd) or True)
+        result = backend.apply_state("speaking")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["queued"])
+        self.assertTrue(result["delivered"])
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0]["command"], "applySemanticState")
+        self.assertEqual(captured[0]["args"], ["speaking"])
+
+    def test_sink_exception_is_caught_and_delivered_is_false(self):
+        def failing_sink(cmd):
+            raise RuntimeError("sink error")
+        backend = Live2DBackend(command_sink=failing_sink)
+        result = backend.apply_state("idle")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["queued"])
+        self.assertFalse(result["delivered"])
+        self.assertIn("command_sink 提交失败", result["error"])
+
+    def test_drain_commands_with_sink_marks_submitted(self):
+        backend = Live2DBackend(command_sink=lambda cmd: True)
+        backend.apply_state("confused")
+        backend.set_parameter("ParamAngleX", 10)
+        commands = backend.drain_commands()
+        self.assertEqual(len(commands), 2)
+        self.assertTrue(all(c["delivered"] for c in commands))
+
 
 if __name__ == "__main__":
     unittest.main()
