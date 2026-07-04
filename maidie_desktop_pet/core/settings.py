@@ -49,6 +49,12 @@ CODING_AGENT_DEFAULTS = {
     "idle_timeout_seconds": 30,
     "dry_run": True,
 }
+ANIMATION_DEFAULTS = {
+    "backend": "sprite",
+    "current_model_id": "",
+    "live2d_model_root": "",
+    "live2d_models": [],
+}
 
 
 class ConfigStore:
@@ -90,6 +96,15 @@ class ConfigStore:
                 timeout = 120
             coding_agent["timeout_seconds"] = max(1, min(600, timeout))
             coding_agent["dry_run"] = True
+            animation = config.setdefault("animation", {})
+            for key, value in ANIMATION_DEFAULTS.items():
+                animation.setdefault(key, deepcopy(value))
+            backend = str(animation.get("backend") or "sprite").strip().lower()
+            animation["backend"] = backend if backend in {"sprite", "live2d_web"} else "sprite"
+            animation["current_model_id"] = str(animation.get("current_model_id") or "")
+            animation["live2d_model_root"] = str(animation.get("live2d_model_root") or "")
+            if not isinstance(animation.get("live2d_models"), list):
+                animation["live2d_models"] = []
             return config
 
     def public_settings(self) -> dict[str, Any]:
@@ -102,6 +117,7 @@ class ConfigStore:
         vision = config.get("vision", {})
         workspace = config.get("workspace", {})
         coding_agent = config.get("coding_agent", {})
+        animation = config.get("animation", {})
         key = str(ai.get("api_key", ""))
         return {
             "provider": ai.get("provider", "deepseek"),
@@ -138,6 +154,10 @@ class ConfigStore:
             "coding_agent_timeout_seconds": int(coding_agent.get("timeout_seconds", 120)),
             "coding_agent_idle_timeout_seconds": int(coding_agent.get("idle_timeout_seconds", 30)),
             "coding_agent_dry_run": True,
+            "animation_backend": str(animation.get("backend", "sprite")),
+            "animation_current_model_id": str(animation.get("current_model_id", "")),
+            "animation_live2d_model_root": str(animation.get("live2d_model_root", "")),
+            "animation_live2d_models": deepcopy(animation.get("live2d_models", [])),
         }
 
     def update_user_settings(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -151,6 +171,7 @@ class ConfigStore:
             vision = config.setdefault("vision", {})
             workspace = config.setdefault("workspace", {})
             coding_agent = config.setdefault("coding_agent", {})
+            animation = config.setdefault("animation", {})
             ai["provider"] = str(values.get("provider", ai.get("provider", "deepseek")))
             ai["base_url"] = str(values.get("base_url", ai.get("base_url", ""))).rstrip("/")
             ai["model"] = str(values.get("chat_model", ai.get("model", "")))
@@ -208,6 +229,18 @@ class ConfigStore:
             coding_agent["timeout_seconds"] = max(1, min(600, timeout))
             # Version one is read-only regardless of UI or caller input.
             coding_agent["dry_run"] = True
+            backend = str(values.get(
+                "animation_backend", animation.get("backend", "sprite")
+            )).strip().lower()
+            animation["backend"] = backend if backend in {"sprite", "live2d_web"} else "sprite"
+            animation["current_model_id"] = str(values.get(
+                "animation_current_model_id", animation.get("current_model_id", "")
+            ) or "")
+            animation["live2d_model_root"] = str(values.get(
+                "animation_live2d_model_root", animation.get("live2d_model_root", "")
+            ) or "").strip()
+            models = values.get("animation_live2d_models", animation.get("live2d_models", []))
+            animation["live2d_models"] = deepcopy(models) if isinstance(models, list) else []
             self._atomic_write(config)
             return deepcopy(config)
 

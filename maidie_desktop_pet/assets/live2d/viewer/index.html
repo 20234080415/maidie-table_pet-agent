@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Maidie Live2D Preview</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #241d22; color: #f5e8ed; font-family: sans-serif; }
+    #stage { width: 100%; height: 100%; overflow: hidden; }
+    #status { position: fixed; inset: 12px 12px auto 12px; z-index: 5; padding: 10px;
+      border-radius: 8px; background: rgba(45, 31, 38, .88); white-space: pre-wrap; }
+    canvas { width: 100%; height: 100%; }
+  </style>
+  <script src="vendor/pixi.min.js"></script>
+  <script src="vendor/live2dcubismcore.min.js"></script>
+  <script src="vendor/cubism4.min.js"></script>
+</head>
+<body>
+  <div id="status">Waiting for a model…</div>
+  <div id="stage"></div>
+  <script>
+    let app = null;
+    let currentModel = null;
+    const statusNode = document.getElementById("status");
+    const runtimeMessage = "Live2D Web Runtime is not installed. Please place runtime files under assets/live2d/viewer/vendor/ or configure runtime path.";
+
+    function result(ok, code, message) {
+      statusNode.textContent = message;
+      return {ok, code, message};
+    }
+
+    function runtimeReady() {
+      return Boolean(window.PIXI && PIXI.Application && PIXI.live2d && PIXI.live2d.Live2DModel);
+    }
+
+    async function loadModelAsync(model3JsonPath) {
+      if (!runtimeReady()) return result(false, "runtime_missing", runtimeMessage);
+      try {
+        if (!app) {
+          app = new PIXI.Application({resizeTo: document.getElementById("stage"),
+            backgroundAlpha: 0, antialias: true});
+          document.getElementById("stage").appendChild(app.view);
+        }
+        if (currentModel) {
+          app.stage.removeChild(currentModel);
+          currentModel.destroy({children: true});
+        }
+        currentModel = await PIXI.live2d.Live2DModel.from(model3JsonPath);
+        app.stage.addChild(currentModel);
+        const scale = Math.min(app.renderer.width / currentModel.width,
+          app.renderer.height / currentModel.height) * 0.82;
+        currentModel.scale.set(scale);
+        currentModel.anchor.set(0.5, 0.5);
+        currentModel.position.set(app.renderer.width / 2, app.renderer.height / 2);
+        return result(true, "loaded", "Live2D model loaded.");
+      } catch (error) {
+        return result(false, "model_load_failed", "Live2D model load failed: " + String(error));
+      }
+    }
+
+    window.loadModel = function(model3JsonPath) {
+      if (!runtimeReady()) return result(false, "runtime_missing", runtimeMessage);
+      loadModelAsync(model3JsonPath);
+      return result(true, "loading", "Loading Live2D model…");
+    };
+
+    window.setExpression = function(name) {
+      if (!currentModel) return result(false, "model_not_loaded", "No Live2D model is loaded.");
+      try {
+        currentModel.expression(name);
+        return result(true, "expression_set", "Expression set: " + name);
+      } catch (error) {
+        return result(false, "expression_failed", String(error));
+      }
+    };
+
+    window.setParameter = function(name, value) {
+      if (!currentModel) return result(false, "model_not_loaded", "No Live2D model is loaded.");
+      try {
+        const core = currentModel.internalModel && currentModel.internalModel.coreModel;
+        if (!core || !core.setParameterValueById) throw new Error("Core model parameter API unavailable.");
+        core.setParameterValueById(name, Number(value));
+        return result(true, "parameter_set", "Parameter set: " + name);
+      } catch (error) {
+        return result(false, "parameter_failed", String(error));
+      }
+    };
+
+    if (!runtimeReady()) result(false, "runtime_missing", runtimeMessage);
+  </script>
+</body>
+</html>

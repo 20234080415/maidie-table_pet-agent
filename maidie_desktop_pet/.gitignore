@@ -8,3 +8,15 @@ memory/conversations.json
 memory/memories.db
 memory/memories.db-*
 memory/scheduled_tasks.json
+
+# External Live2D assets (keep assets/live2d/README.md tracked)
+*.moc3
+*.model3.json
+*.motion3.json
+*.physics3.json
+*.cdi3.json
+*.exp3.json
+assets/live2d/models/
+assets/live2d/sample_*/
+assets/live2d/viewer/vendor/*
+!assets/live2d/viewer/vendor/README.md

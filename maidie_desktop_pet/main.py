@@ -24,6 +24,7 @@ from core.proactive import ProactiveEngine, ProactiveRuntime
 from core.tasks import TaskScheduler
 from core.vision import ScreenReader, VisionService
 from core.version import APP_NAME, APP_VERSION
+from animation.live2d_web import resolve_animation_backend
 from input.manager import InputManager
 from memory.memory import ConversationMemory
 from ui.window import PetWindow
@@ -42,6 +43,11 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
 
     config_store = ConfigStore(ROOT / "config" / "config.json")
     config = config_store.load()
+    runtime_animation_backend, animation_status = resolve_animation_backend(
+        config.get("animation", {})
+    )
+    if runtime_animation_backend != config.get("animation", {}).get("backend", "sprite"):
+        logger.warning("Live2D backend unavailable: %s", animation_status.message)
     chat_client, codex_client = OpenAICompatibleClient.clients_from_config(
         ROOT / "config" / "config.json"
     )

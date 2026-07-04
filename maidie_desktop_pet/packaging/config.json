@@ -35,6 +35,12 @@
   "fence": {
     "show_overlay": true
   },
+  "animation": {
+    "backend": "sprite",
+    "current_model_id": "",
+    "live2d_model_root": "",
+    "live2d_models": []
+  },
   "network": {
     "enabled": false,
     "timeout": 10,

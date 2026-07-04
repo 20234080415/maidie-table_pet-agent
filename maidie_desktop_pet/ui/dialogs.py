@@ -24,6 +24,9 @@ from PyQt6.QtWidgets import (
 )
 
 from core.settings import PERSONALITY_PRESETS
+from animation.live2d_web import Live2DWebPreview
+from animation.model_manager import AnimationModelRegistry
+from ui.live2d_preview_dialog import create_live2d_preview_dialog
 from core.tools.coding_agent_tool import CodingAgentTool
 from core.tools.coding_agent_installer import CodingAgentInstaller
 
@@ -92,6 +95,23 @@ class _OpenCodeInstallWorker(QObject):
         self.finished.emit(self.installer.install_opencode(self.method))
 
 
+class _Live2DScanWorker(QObject):
+    finished = pyqtSignal(object)
+
+    def __init__(self, root: str) -> None:
+        super().__init__()
+        self.root = root
+
+    @pyqtSlot()
+    def run(self) -> None:
+        try:
+            registry = AnimationModelRegistry()
+            models = [model.to_dict() for model in registry.scan_model_root(self.root)]
+            self.finished.emit({"ok": True, "models": models})
+        except Exception as exc:
+            self.finished.emit({"ok": False, "models": [], "error": str(exc)})
+
+
 class RecentChatsDialog(QDialog):
     def __init__(self, controller, parent=None):
         super().__init__(parent)
@@ -139,6 +159,14 @@ class SettingsDialog(QDialog):
         self.coding_agent_installer = CodingAgentInstaller(timeout_seconds=300)
         self._install_thread: QThread | None = None
         self._install_worker: _OpenCodeInstallWorker | None = None
+        self._live2d_scan_thread: QThread | None = None
+        self._live2d_scan_worker: _Live2DScanWorker | None = None
+        self.live2d_registry = AnimationModelRegistry(
+            self.settings.get("animation_live2d_models", []),
+            self.settings.get("animation_current_model_id", ""),
+        )
+        self.live2d_preview = Live2DWebPreview()
+        self._live2d_preview_windows: list[QDialog] = []
         self.setWindowTitle("Maidie 设置")
         self.resize(720, 540)
         self.setStyleSheet(BASE_STYLE)
@@ -146,6 +174,7 @@ class SettingsDialog(QDialog):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_personality_tab(), "性格")
         self.tabs.addTab(self._build_model_tab(), "模型与 API")
+        self.tabs.addTab(self._build_animation_tab(), "动画 / Live2D")
         self.tabs.addTab(self._build_network_tab(), "联网查询")
         self.tabs.addTab(self._build_vision_tab(), "千问视觉")
         self.tabs.addTab(self._build_coding_agent_tab(), "工作区 / Coding Agent")
@@ -283,6 +312,196 @@ class SettingsDialog(QDialog):
         layout.addRow("OCR 间隔", self.screen_awareness_interval)
         layout.addRow("", note)
         return page
+
+    def _build_animation_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QFormLayout(page)
+        self.animation_backend = QComboBox()
+        self.animation_backend.addItem("Sprite（默认）", "sprite")
+        self.animation_backend.addItem("Live2D Web（实验性）", "live2d_web")
+        backend_index = self.animation_backend.findData(
+            self.settings.get("animation_backend", "sprite")
+        )
+        self.animation_backend.setCurrentIndex(max(0, backend_index))
+
+        self.live2d_model_root = QLineEdit(
+            self.settings.get("animation_live2d_model_root", "")
+        )
+        self.live2d_model_root.setPlaceholderText("选择已解压的 Live2D 模型根目录")
+        choose_button = QPushButton("选择目录")
+        choose_button.clicked.connect(self._choose_live2d_root)
+        scan_button = QPushButton("扫描模型")
+        scan_button.setObjectName("scanLive2DModelsButton")
+        scan_button.clicked.connect(self._scan_live2d_models)
+        self.scan_live2d_button = scan_button
+        root_row = QWidget()
+        root_layout = QHBoxLayout(root_row)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.addWidget(self.live2d_model_root, 1)
+        root_layout.addWidget(choose_button)
+        root_layout.addWidget(scan_button)
+
+        self.live2d_model = QComboBox()
+        self.live2d_model.currentIndexChanged.connect(self._update_live2d_preview)
+        self._populate_live2d_models()
+        apply_button = QPushButton("应用所选模型")
+        apply_button.clicked.connect(self._apply_live2d_model)
+        preview_button = QPushButton("预览模型")
+        preview_button.setObjectName("previewLive2DModelButton")
+        preview_button.clicked.connect(self._preview_live2d_model)
+        sprite_button = QPushButton("回退 Sprite")
+        sprite_button.clicked.connect(self._fallback_to_sprite)
+        action_row = QWidget()
+        action_layout = QHBoxLayout(action_row)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.addWidget(apply_button)
+        action_layout.addWidget(preview_button)
+        action_layout.addWidget(sprite_button)
+
+        self.live2d_preview_label = QLabel()
+        self.live2d_preview_label.setObjectName("live2dPreviewStatus")
+        self.live2d_preview_label.setWordWrap(True)
+        note = QLabel(
+            "预览在独立窗口中运行，不替换主桌宠渲染。"
+            "缺少 PyQt6-WebEngine、Live2D Web Runtime 或模型失效时会明确报错。"
+        )
+        note.setWordWrap(True)
+        layout.addRow("当前后端", self.animation_backend)
+        layout.addRow("模型根目录", root_row)
+        layout.addRow("已扫描模型", self.live2d_model)
+        layout.addRow("操作", action_row)
+        layout.addRow("预览 / 状态", self.live2d_preview_label)
+        layout.addRow("", note)
+        self._update_live2d_preview()
+        return page
+
+    def _choose_live2d_root(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self, "选择 Live2D 模型根目录", self.live2d_model_root.text().strip()
+        )
+        if selected:
+            self.live2d_model_root.setText(selected)
+
+    def _scan_live2d_models(self) -> None:
+        root = self.live2d_model_root.text().strip()
+        if not root:
+            self.live2d_preview_label.setText("请先选择 Live2D 模型根目录。")
+            return
+        if self._live2d_scan_thread is not None:
+            return
+        self.scan_live2d_button.setEnabled(False)
+        self.live2d_preview_label.setText("正在后台递归扫描 *.model3.json …")
+        thread = QThread(self)
+        worker = _Live2DScanWorker(root)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._finish_live2d_scan)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        self._live2d_scan_thread = thread
+        self._live2d_scan_worker = worker
+        thread.start()
+
+    @pyqtSlot(object)
+    def _finish_live2d_scan(self, result: object) -> None:
+        payload = result if isinstance(result, dict) else {}
+        self._live2d_scan_thread = None
+        self._live2d_scan_worker = None
+        self.scan_live2d_button.setEnabled(True)
+        if not payload.get("ok"):
+            self.live2d_preview_label.setText(
+                f"扫描失败：{payload.get('error', '未知错误')}。将保持 Sprite。"
+            )
+            self._fallback_to_sprite()
+            return
+        current = self.live2d_model.currentData() or self.live2d_registry.current_model_id
+        self.live2d_registry = AnimationModelRegistry(payload.get("models", []), current)
+        count = len(self.live2d_registry.list_models())
+        if not count:
+            self._populate_live2d_models()
+            self.live2d_preview_label.setText(
+                "未扫描到 *.model3.json。ZIP 不会被自动解压，请先在仓库外解压模型。"
+            )
+            self._fallback_to_sprite()
+        else:
+            if self.live2d_registry.resolve_current_model() is None:
+                self.live2d_registry.set_current_model(
+                    self.live2d_registry.list_models()[0].id
+                )
+            self._populate_live2d_models()
+            self._update_live2d_preview()
+            self.live2d_preview_label.setText(
+                f"已扫描到 {count} 个 Live2D 模型，已选择 "
+                f"{self.live2d_model.currentText()}。"
+            )
+
+    def _populate_live2d_models(self) -> None:
+        if not hasattr(self, "live2d_model"):
+            return
+        current = self.live2d_registry.current_model_id
+        self.live2d_model.blockSignals(True)
+        self.live2d_model.clear()
+        self.live2d_model.addItem("未选择", "")
+        for model in self.live2d_registry.list_models():
+            self.live2d_model.addItem(model.name, model.id)
+        index = self.live2d_model.findData(current)
+        self.live2d_model.setCurrentIndex(max(0, index))
+        self.live2d_model.blockSignals(False)
+
+    def _update_live2d_preview(self) -> None:
+        if not hasattr(self, "live2d_preview_label"):
+            return
+        model_id = self.live2d_model.currentData() if hasattr(self, "live2d_model") else ""
+        model = next((item for item in self.live2d_registry.list_models()
+                      if item.id == model_id), None)
+        status = self.live2d_preview.inspect(model)
+        details = f"\n{status.model_name}\n{status.model3_json}" if status.model3_json else ""
+        self.live2d_preview_label.setText(status.message + details)
+
+    def _apply_live2d_model(self) -> None:
+        model_id = str(self.live2d_model.currentData() or "")
+        try:
+            model = self.live2d_registry.set_current_model(model_id)
+        except (KeyError, FileNotFoundError) as exc:
+            self.live2d_preview_label.setText(f"{exc}。将保持 Sprite。")
+            self._fallback_to_sprite()
+            return
+        status = self.live2d_preview.inspect(model)
+        if not status.available:
+            self.animation_backend.setCurrentIndex(
+                self.animation_backend.findData("sprite")
+            )
+            self.live2d_preview_label.setText(status.message + f"\n{model.name}\n{model.model3_json}")
+            return
+        self.animation_backend.setCurrentIndex(
+            self.animation_backend.findData("live2d_web")
+        )
+        self.live2d_preview_label.setText(status.message + f"\n{model.name}\n{model.model3_json}")
+
+    def _preview_live2d_model(self) -> None:
+        model_id = str(self.live2d_model.currentData() or "")
+        model = next((item for item in self.live2d_registry.list_models()
+                      if item.id == model_id), None)
+        dialog, result = create_live2d_preview_dialog(model, self)
+        self.live2d_preview_label.setText(str(result.get("message", "预览不可用。")))
+        if dialog is None:
+            return
+        self._live2d_preview_windows.append(dialog)
+        dialog.finished.connect(
+            lambda _value, window=dialog: self._forget_live2d_preview(window)
+        )
+        dialog.show()
+
+    def _forget_live2d_preview(self, dialog: QDialog) -> None:
+        if dialog in self._live2d_preview_windows:
+            self._live2d_preview_windows.remove(dialog)
+
+    def _fallback_to_sprite(self) -> None:
+        if hasattr(self, "animation_backend"):
+            self.animation_backend.setCurrentIndex(self.animation_backend.findData("sprite"))
+        if hasattr(self, "live2d_preview_label"):
+            self.live2d_preview_label.setText("已选择 Sprite 后端。")
 
     def _build_coding_agent_tab(self) -> QWidget:
         page = QWidget()
@@ -606,6 +825,12 @@ class SettingsDialog(QDialog):
         if self._install_thread is not None:
             QMessageBox.information(self, "OpenCode 正在安装", "请等待安装完成后再保存设置。")
             return
+        if self.animation_backend.currentData() == "live2d_web":
+            model = self.live2d_registry.resolve_current_model()
+            status = self.live2d_preview.inspect(model)
+            if not status.available:
+                self.animation_backend.setCurrentIndex(self.animation_backend.findData("sprite"))
+                self.live2d_preview_label.setText(status.message)
         values = {
             "provider": self.provider.currentData(),
             "base_url": self.base_url.text().strip(),
@@ -640,6 +865,12 @@ class SettingsDialog(QDialog):
             "coding_agent_command": self.coding_agent_command.text().strip(),
             "coding_agent_timeout_seconds": self.coding_agent_timeout.value(),
             "coding_agent_dry_run": True,
+            "animation_backend": self.animation_backend.currentData(),
+            "animation_current_model_id": str(self.live2d_model.currentData() or ""),
+            "animation_live2d_model_root": self.live2d_model_root.text().strip(),
+            "animation_live2d_models": [
+                model.to_dict() for model in self.live2d_registry.list_models()
+            ],
         }
         if not values["base_url"] or not values["chat_model"] or not values["technical_model"]:
             return
@@ -647,12 +878,18 @@ class SettingsDialog(QDialog):
         self.accept()
 
     def reject(self) -> None:
+        if self._live2d_scan_thread is not None:
+            QMessageBox.information(self, "正在扫描", "请等待 Live2D 模型扫描完成。")
+            return
         if self._install_thread is not None:
             QMessageBox.information(self, "OpenCode 正在安装", "请等待安装完成后再关闭设置。")
             return
         super().reject()
 
     def closeEvent(self, event) -> None:
+        if self._live2d_scan_thread is not None:
+            event.ignore()
+            return
         if self._install_thread is not None:
             event.ignore()
             return
