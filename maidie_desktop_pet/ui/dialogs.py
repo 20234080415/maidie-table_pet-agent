@@ -27,6 +27,7 @@ from core.settings import PERSONALITY_PRESETS
 from animation.live2d_web import Live2DWebPreview
 from animation.live2d_preview_server import open_browser_preview
 from animation.model_manager import AnimationModelRegistry
+from ui.live2d_pet_window import create_live2d_pet_window
 from ui.live2d_preview_dialog import create_live2d_preview_dialog
 from core.tools.coding_agent_tool import CodingAgentTool
 from core.tools.coding_agent_installer import CodingAgentInstaller
@@ -169,6 +170,7 @@ class SettingsDialog(QDialog):
         self.live2d_preview = Live2DWebPreview()
         self._live2d_preview_windows: list[QDialog] = []
         self._live2d_preview_servers: list[object] = []
+        self._live2d_pet_window: QWidget | None = None
         self.setWindowTitle("Maidie 设置")
         flags = self.windowFlags()
         flags &= ~Qt.WindowType.WindowStaysOnTopHint
@@ -371,6 +373,35 @@ class SettingsDialog(QDialog):
         self.live2d_preview_label = QLabel()
         self.live2d_preview_label.setObjectName("live2dPreviewStatus")
         self.live2d_preview_label.setWordWrap(True)
+
+        pet_open_btn = QPushButton("打开 Live2D 实验窗口")
+        pet_open_btn.setObjectName("openLive2DPetWindowButton")
+        pet_open_btn.clicked.connect(self._open_live2d_pet_window)
+        pet_speaking_btn = QPushButton("测试 speaking")
+        pet_speaking_btn.setObjectName("testLive2DSpeakingButton")
+        pet_speaking_btn.clicked.connect(lambda: self._test_live2d_pet_state("speaking"))
+        pet_confused_btn = QPushButton("测试 confused")
+        pet_confused_btn.setObjectName("testLive2DConfusedButton")
+        pet_confused_btn.clicked.connect(lambda: self._test_live2d_pet_state("confused"))
+        pet_success_btn = QPushButton("测试 success")
+        pet_success_btn.setObjectName("testLive2DSuccessButton")
+        pet_success_btn.clicked.connect(lambda: self._test_live2d_pet_state("success"))
+        pet_error_btn = QPushButton("测试 error")
+        pet_error_btn.setObjectName("testLive2DErrorButton")
+        pet_error_btn.clicked.connect(lambda: self._test_live2d_pet_state("error"))
+        pet_close_btn = QPushButton("关闭 Live2D 实验窗口")
+        pet_close_btn.setObjectName("closeLive2DPetWindowButton")
+        pet_close_btn.clicked.connect(self._close_live2d_pet_window)
+        pet_row = QWidget()
+        pet_layout = QHBoxLayout(pet_row)
+        pet_layout.setContentsMargins(0, 0, 0, 0)
+        pet_layout.addWidget(pet_open_btn)
+        pet_layout.addWidget(pet_speaking_btn)
+        pet_layout.addWidget(pet_confused_btn)
+        pet_layout.addWidget(pet_success_btn)
+        pet_layout.addWidget(pet_error_btn)
+        pet_layout.addWidget(pet_close_btn)
+
         note = QLabel(
             "预览在独立窗口中运行，不替换主桌宠渲染。"
             "缺少 PyQt6-WebEngine、Live2D Web Runtime 或模型失效时会明确报错。"
@@ -380,6 +411,7 @@ class SettingsDialog(QDialog):
         layout.addRow("模型根目录", root_row)
         layout.addRow("已扫描模型", self.live2d_model)
         layout.addRow("操作", action_row)
+        layout.addRow("实验桌宠", pet_row)
         layout.addRow("预览 / 状态", self.live2d_preview_label)
         layout.addRow("", note)
         self._update_live2d_preview()
@@ -526,6 +558,37 @@ class SettingsDialog(QDialog):
     def _forget_live2d_preview(self, dialog: QDialog) -> None:
         if dialog in self._live2d_preview_windows:
             self._live2d_preview_windows.remove(dialog)
+
+    def _open_live2d_pet_window(self) -> None:
+        model_id = str(self.live2d_model.currentData() or "")
+        model = next((item for item in self.live2d_registry.list_models()
+                      if item.id == model_id), None)
+        window, result = create_live2d_pet_window(model, self)
+        if window is None:
+            self.live2d_preview_label.setText(str(result.get("message", "无法创建实验窗口。")))
+            return
+        self._live2d_pet_window = window
+        window.show()
+        self.live2d_preview_label.setText(str(result.get("message", "实验窗口已打开。")))
+
+    def _test_live2d_pet_state(self, state: str) -> None:
+        if self._live2d_pet_window is None:
+            self.live2d_preview_label.setText("请先打开 Live2D 实验窗口。")
+            return
+        if not hasattr(self._live2d_pet_window, "test_state"):
+            self.live2d_preview_label.setText("实验窗口不支持测试状态命令。")
+            return
+        result = self._live2d_pet_window.test_state(state)
+        self.live2d_preview_label.setText(
+            f"测试 {state}：{'成功' if result.get('ok') else '失败'} - "
+            f"{result.get('command', '')} {result.get('args', [])}"
+        )
+
+    def _close_live2d_pet_window(self) -> None:
+        if self._live2d_pet_window is not None:
+            self._live2d_pet_window.close()
+            self._live2d_pet_window = None
+            self.live2d_preview_label.setText("Live2D 实验窗口已关闭。")
 
     def _fallback_to_sprite(self) -> None:
         if hasattr(self, "animation_backend"):
@@ -923,4 +986,7 @@ class SettingsDialog(QDialog):
         if self._install_thread is not None:
             event.ignore()
             return
+        if self._live2d_pet_window is not None:
+            self._live2d_pet_window.close()
+            self._live2d_pet_window = None
         super().closeEvent(event)
