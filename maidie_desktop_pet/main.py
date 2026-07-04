@@ -6,8 +6,25 @@ import signal
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QCoreApplication, Qt, QTimer
 from PyQt6.QtWidgets import QApplication
+
+
+_webengine_ready = False
+
+
+def _prepare_webengine() -> None:
+    global _webengine_ready
+    QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
+    try:
+        import PyQt6.QtWebEngineWidgets  # noqa: F401
+        _webengine_ready = True
+    except ImportError:
+        _webengine_ready = False
+
+
+def webengine_ready() -> bool:
+    return _webengine_ready
 
 from ai.client import OpenAICompatibleClient
 from core.brain import BrainRouter, Synthesizer
@@ -36,6 +53,7 @@ ROOT = Path(__file__).resolve().parent
 
 def build_application() -> tuple[QApplication, PetWindow, PetController, InputManager]:
     logger = setup_logger(ROOT / "logs" / "maidie.log")
+    _prepare_webengine()
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
@@ -43,10 +61,11 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
 
     config_store = ConfigStore(ROOT / "config" / "config.json")
     config = config_store.load()
+    animation_config = config.get("animation", {})
     runtime_animation_backend, animation_status = resolve_animation_backend(
-        config.get("animation", {})
+        animation_config
     )
-    if runtime_animation_backend != config.get("animation", {}).get("backend", "sprite"):
+    if runtime_animation_backend != animation_config.get("backend", "sprite"):
         logger.warning("Live2D backend unavailable: %s", animation_status.message)
     chat_client, codex_client = OpenAICompatibleClient.clients_from_config(
         ROOT / "config" / "config.json"

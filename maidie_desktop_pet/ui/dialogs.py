@@ -403,7 +403,8 @@ class SettingsDialog(QDialog):
         pet_layout.addWidget(pet_close_btn)
 
         note = QLabel(
-            "预览在独立窗口中运行，不替换主桌宠渲染。"
+            "Live2D Web 当前为实验预览，不会替换 Sprite 主桌宠。"
+            "可使用浏览器预览或打开实验窗口验证模型效果。"
             "缺少 PyQt6-WebEngine、Live2D Web Runtime 或模型失效时会明确报错。"
         )
         note.setWordWrap(True)
@@ -567,6 +568,26 @@ class SettingsDialog(QDialog):
         if window is None:
             self.live2d_preview_label.setText(str(result.get("message", "无法创建实验窗口。")))
             return
+        if hasattr(window, "set_callbacks"):
+
+            def _open_settings() -> None:
+                self.show()
+                self.raise_()
+                self.activateWindow()
+
+            def _switch_to_sprite() -> None:
+                self._fallback_to_sprite()
+                self.controller.apply_settings(
+                    {"animation_backend": "sprite"})
+                QMessageBox.information(
+                    window, "已切回 Sprite",
+                    "配置已保存为 Sprite 后端。\n请重启 Maidie 使设置生效。"
+                )
+
+            window.set_callbacks(
+                open_settings=_open_settings,
+                switch_to_sprite=_switch_to_sprite,
+            )
         self._live2d_pet_window = window
         window.show()
         self.live2d_preview_label.setText(str(result.get("message", "实验窗口已打开。")))
