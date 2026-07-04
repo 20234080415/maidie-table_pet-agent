@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Maidie Live2D Preview</title>
+  <link rel="icon" href="data:,">
+  <title>Maidie Live2D 预览</title>
   <style>
     html, body { margin: 0; min-width: 900px; min-height: 700px; width: 100%; height: 100%;
       overflow: hidden; color: #f5e8ed; font-family: sans-serif; }
@@ -16,12 +17,23 @@
     #live2d-canvas-container { position: absolute; inset: 12px; min-width: 876px;
       min-height: 676px; overflow: hidden; border: 3px solid #62d6ff; box-sizing: border-box; }
     #live2d-canvas-container canvas { display: block; width: 100%; height: 100%; }
-    #panel { position: fixed; inset: 24px auto auto 24px; z-index: 10; width: min(520px, 52vw);
-      padding: 12px; border-radius: 8px; background: rgba(31, 34, 40, .9); box-shadow: 0 2px 12px #0008; }
+    #panel { position: fixed; inset: 24px auto 24px 24px; z-index: 10; width: min(410px, 42vw);
+      padding: 12px; overflow: auto; border-radius: 8px; background: rgba(31, 34, 40, .92);
+      box-shadow: 0 2px 12px #0008; }
     #status-message { font-weight: 600; white-space: pre-wrap; }
     #model-url { margin-top: 6px; font-size: 12px; opacity: .8; word-break: break-all; }
     #debug { margin: 10px 0; font: 12px/1.45 monospace; white-space: pre-wrap; }
-    #controls { display: flex; gap: 7px; flex-wrap: wrap; }
+    #controls { display: grid; gap: 8px; }
+    details { border-top: 1px solid #ffffff25; padding-top: 6px; }
+    summary { cursor: pointer; font-weight: 600; color: #9be7ff; }
+    .button-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+    .parameter { display: grid; grid-template-columns: 128px 1fr 45px; gap: 6px;
+      align-items: center; margin-top: 5px; font-size: 12px; }
+    .parameter output { text-align: right; font-family: monospace; }
+    #capabilities { margin-top: 7px; font: 11px/1.45 monospace; white-space: pre-wrap;
+      max-height: 210px; overflow: auto; color: #d9f6ff; }
+    #control-error { color: #ff9eae; }
+    label.toggle { display: inline-flex; gap: 6px; align-items: center; margin-top: 8px; }
     button { padding: 6px 10px; border: 1px solid #78dfff; border-radius: 5px;
       background: #263a47; color: white; cursor: pointer; }
   </style>
@@ -33,13 +45,61 @@
 <body>
   <div id="live2d-canvas-container"></div>
   <section id="panel">
-    <div id="status-message">Waiting for a model…</div>
+    <div id="status-message">正在等待模型…</div>
     <div id="model-url"></div>
     <div id="debug"></div>
     <div id="controls">
-      <button id="fit-model" type="button">Fit Model To View</button>
-      <button id="center-model" type="button">Center Model</button>
-      <button id="reset-view" type="button">Reset View</button>
+      <details open><summary>模型控制</summary><div class="button-row">
+        <button id="reload-model" type="button">重新加载模型</button>
+        <button id="fit-model" type="button">适应窗口</button>
+        <button id="center-model" type="button">居中模型</button>
+        <button id="reset-view" type="button">重置视图</button>
+      </div></details>
+      <details><summary>动作控制</summary><div class="button-row">
+        <button id="play-idle" type="button">播放待机动作</button>
+        <button id="play-tap-body" type="button">播放身体点击动作</button>
+        <button id="play-random" type="button">播放随机动作</button>
+        <button id="stop-motion" type="button">停止／重置动作</button>
+      </div></details>
+      <details><summary>表情控制</summary><div class="button-row">
+        <button id="expression-happy" type="button">切换开心表情</button>
+        <button id="expression-normal" type="button">切换普通表情</button>
+        <button id="expression-sad" type="button">切换难过／困惑表情</button>
+        <button id="clear-expression" type="button">清除表情</button>
+      </div></details>
+      <details><summary>参数调节</summary>
+        <div id="parameter-controls"></div>
+        <div class="button-row"><button id="reset-parameters" type="button">重置参数</button></div>
+      </details>
+      <details><summary>交互测试</summary><div class="button-row">
+        <button id="start-mouth-test" type="button">开始嘴型测试</button>
+        <button id="stop-mouth-test" type="button">停止嘴型测试</button>
+      </div><label class="toggle"><input id="mouse-follow" type="checkbox"> 启用鼠标跟随</label></details>
+      <details open><summary>语义状态控制</summary><div class="button-row">
+        <button type="button" data-semantic-state="idle">应用 idle</button>
+        <button type="button" data-semantic-state="speaking">应用 speaking</button>
+        <button type="button" data-semantic-state="thinking">应用 thinking</button>
+        <button type="button" data-semantic-state="confused">应用 confused</button>
+        <button type="button" data-semantic-state="success">应用 success</button>
+        <button type="button" data-semantic-state="error">应用 error</button>
+        <button type="button" data-semantic-state="sleepy">应用 sleepy</button>
+        <button type="button" data-semantic-state="dragged">应用 dragged</button>
+      </div>
+        <div>当前语义状态：<span id="semantic-current">无</span></div>
+        <div>最近应用动作：<span id="semantic-motion">无</span></div>
+        <div>最近应用表情：<span id="semantic-expression">无</span></div>
+        <div>最近参数变化：<span id="semantic-parameters">无</span></div>
+        <div>当前 Action Profile：<span id="semantic-profile">无</span></div>
+        <div>强度：<span id="semantic-intensity">无</span></div>
+        <div>持续时间：<span id="semantic-duration">无</span></div>
+        <div>回退原因：<span id="semantic-fallback">无</span></div>
+      </details>
+      <details open><summary>模型能力</summary>
+        <div id="capabilities"></div>
+        <div>最近控制操作：<span id="control-action">无</span></div>
+        <div>最近控制结果：<span id="control-result">无</span></div>
+        <div>最近控制错误：<span id="control-error">无</span></div>
+      </details>
     </div>
   </section>
   <script>
@@ -51,7 +111,71 @@
     const statusNode = document.getElementById("status-message");
     const modelUrlNode = document.getElementById("model-url");
     const debugNode = document.getElementById("debug");
-    const runtimeMessage = "Live2D runtime files are missing. Please place required runtime files under assets/live2d/viewer/vendor/.";
+    const capabilitiesNode = document.getElementById("capabilities");
+    const controlActionNode = document.getElementById("control-action");
+    const controlResultNode = document.getElementById("control-result");
+    const controlErrorNode = document.getElementById("control-error");
+    const semanticCurrentNode = document.getElementById("semantic-current");
+    const semanticMotionNode = document.getElementById("semantic-motion");
+    const semanticExpressionNode = document.getElementById("semantic-expression");
+    const semanticParametersNode = document.getElementById("semantic-parameters");
+    const semanticProfileNode = document.getElementById("semantic-profile");
+    const semanticIntensityNode = document.getElementById("semantic-intensity");
+    const semanticDurationNode = document.getElementById("semantic-duration");
+    const semanticFallbackNode = document.getElementById("semantic-fallback");
+    const runtimeMessage = "缺少 Live2D 运行库文件，请将所需文件放入 assets/live2d/viewer/vendor/。";
+    let currentModelUrl = "";
+    let renderFailure = null;
+    let mouthAnimationFrame = 0;
+    let mouseFollowEnabled = false;
+    let semanticRunId = 0;
+    let modelCapabilities = {motions: [], expressions: [], parameters: []};
+    const initialParameters = new Map();
+    const parameterOverrides = new Map();
+    const testedParameters = [
+      {name: "ParamAngleX", min: -30, max: 30, step: 1, reset: 0},
+      {name: "ParamAngleY", min: -30, max: 30, step: 1, reset: 0},
+      {name: "ParamAngleZ", min: -30, max: 30, step: 1, reset: 0},
+      {name: "ParamBodyAngleX", min: -30, max: 30, step: 1, reset: 0},
+      {name: "ParamMouthOpenY", min: 0, max: 1, step: 0.01, reset: 0},
+      {name: "ParamEyeLOpen", min: 0, max: 1, step: 0.01, reset: 1},
+      {name: "ParamEyeROpen", min: 0, max: 1, step: 0.01, reset: 1}
+    ];
+    const parameterAliases = {
+      ParamAngleX: ["PARAM_ANGLE_X"], ParamAngleY: ["PARAM_ANGLE_Y"], ParamAngleZ: ["PARAM_ANGLE_Z"],
+      ParamBodyAngleX: ["PARAM_BODY_ANGLE_X"], ParamMouthOpenY: ["PARAM_MOUTH_OPEN_Y", "ParamA"],
+      ParamEyeLOpen: ["PARAM_EYE_L_OPEN"], ParamEyeROpen: ["PARAM_EYE_R_OPEN"]
+    };
+    const ACTION_PROFILES = Object.freeze({
+      idle: {motion_candidates: ["Idle"], expression_candidates: ["normal", "default", "neutral"],
+        parameters: {}, duration_ms: 350, easing: "easeOut", intensity: 1,
+        fallback_reason: "没有待机动作时仅重置参数"},
+      speaking: {motion_candidates: [], expression_candidates: [],
+        parameters: {ParamAngleX: 4, ParamAngleY: 2}, duration_ms: 500, easing: "easeInOut", intensity: 1,
+        fallback_reason: "使用嘴型测试和轻微头部摆动"},
+      thinking: {motion_candidates: [], expression_candidates: ["normal", "neutral"],
+        parameters: {ParamAngleY: -10, ParamAngleZ: -6, ParamMouthOpenY: 0.05},
+        duration_ms: 450, easing: "easeOut", intensity: 1, fallback_reason: "使用倾头参数模拟思考"},
+      confused: {motion_candidates: ["Flick"], expression_candidates: ["confused", "sad", "worry"],
+        parameters: {ParamAngleX: 18, ParamAngleY: -12, ParamAngleZ: 15, ParamMouthOpenY: 0.25,
+          ParamEyeLOpen: 0.55, ParamEyeROpen: 0.55}, duration_ms: 420, easing: "easeOutBack", intensity: 1,
+        fallback_reason: "使用明显倾头、半眯眼和微张嘴模拟困惑"},
+      success: {motion_candidates: ["__random__"], expression_candidates: ["happy", "smile", "joy", "f01"],
+        parameters: {ParamAngleY: 8, ParamMouthOpenY: 0.35}, duration_ms: 320, easing: "easeOutBack", intensity: 1,
+        fallback_reason: "表情或动作缺失时使用抬头和张嘴参数"},
+      error: {motion_candidates: [], expression_candidates: ["sad", "confused", "worry", "angry"],
+        parameters: {ParamAngleY: -16, ParamAngleZ: -8, ParamEyeLOpen: 0.45, ParamEyeROpen: 0.45},
+        duration_ms: 500, easing: "easeInOut", intensity: 1, fallback_reason: "使用低头、倾斜和半眯眼模拟错误"},
+      sleepy: {motion_candidates: ["Idle"], expression_candidates: ["normal", "neutral"],
+        parameters: {ParamAngleZ: -12, ParamEyeLOpen: 0.22, ParamEyeROpen: 0.22},
+        duration_ms: 800, easing: "easeInOut", intensity: 0.8, fallback_reason: "使用闭眼和慢速倾头模拟困倦"},
+      dragged: {motion_candidates: ["__random__"], expression_candidates: ["surprised"],
+        parameters: {ParamAngleZ: 18, ParamAngleX: 10, ParamMouthOpenY: 0.2},
+        duration_ms: 260, easing: "easeOutBack", intensity: 1, fallback_reason: "使用大幅倾斜和惊讶嘴型模拟拖动"},
+      headpat: {motion_candidates: ["Flick", "Tap"], expression_candidates: ["happy", "smile", "f01"],
+        parameters: {ParamAngleY: -14, ParamEyeLOpen: 0.5, ParamEyeROpen: 0.5},
+        duration_ms: 420, easing: "easeInOut", intensity: 1, fallback_reason: "使用低头和半闭眼模拟摸头反馈"}
+    });
     let previewState = {ok: false, code: "idle", message: "Waiting for a model…"};
 
     function result(ok, code, message) {
@@ -59,6 +183,19 @@
       previewState = {ok, code, message};
       updateDebugPanel();
       return previewState;
+    }
+
+    function controlResult(ok, action, code, message, error) {
+      const payload = {ok, action, code, message, error: error ? String(error) : ""};
+      controlActionNode.textContent = action;
+      controlResultNode.textContent = code + ": " + message;
+      controlErrorNode.textContent = payload.error || "无";
+      return payload;
+    }
+
+    function requireModel(action) {
+      if (currentModel) return null;
+      return controlResult(false, action, "model_not_loaded", "尚未加载 Live2D 模型。");
     }
 
     function runtimeReady() {
@@ -76,11 +213,6 @@
       }
     }
 
-    function compatibleCore() {
-      const version = cubismCoreVersion();
-      return !version || version.major <= 4;
-    }
-
     function viewportSize() {
       return {
         width: Math.max(900, container.clientWidth || window.innerWidth || 900),
@@ -91,11 +223,17 @@
     function ensurePixiApplication() {
       const size = viewportSize();
       if (!app) {
+        // pixi-live2d-display 0.4.0's Cubism 4 masking renderer is a WebGL 1
+        // implementation; WebGL 2 can leak the mask framebuffer onto the canvas.
+        if (PIXI.settings && PIXI.ENV) {
+          PIXI.settings.PREFER_ENV = PIXI.ENV.WEBGL_LEGACY;
+        }
         app = new PIXI.Application({width: size.width, height: size.height,
           backgroundAlpha: 0, antialias: true, autoStart: true});
         const canvas = app.view || app.canvas;
-        if (!canvas) throw new Error("Pixi Application did not create a canvas.");
+        if (!canvas) throw new Error("Pixi 应用未能创建画布。");
         container.replaceChildren(canvas);
+        window.__maidiePixiApplication = app;
       }
       app.renderer.resize(size.width, size.height);
       app.stage.visible = true;
@@ -113,7 +251,7 @@
       return {x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height};
     }
 
-    function centerModel() {
+    function centerModelInternal() {
       if (!app || !currentModel || !currentModelBounds) return false;
       const bounds = currentModelBounds;
       currentModel.position.set(
@@ -124,31 +262,31 @@
       return true;
     }
 
-    function fitModelToView() {
+    function fitModelToViewInternal() {
       if (!app || !currentModel) return false;
       currentModelBounds = readModelBounds();
       if (!currentModelBounds) {
-        result(false, "invalid_model_bounds", "Model loaded but not visible. Check bounds, scale, position, and canvas size.");
+        result(false, "invalid_model_bounds", "模型已加载但不可见，请检查边界、缩放、位置和画布尺寸。");
         return false;
       }
       const heightScale = app.renderer.height * 0.70 / currentModelBounds.height;
       const widthScale = app.renderer.width * 0.82 / currentModelBounds.width;
       const scale = Math.min(heightScale, widthScale);
       if (!Number.isFinite(scale) || scale <= 0) {
-        result(false, "invalid_model_scale", "Model loaded but not visible. Check bounds, scale, position, and canvas size.");
+        result(false, "invalid_model_scale", "模型已加载但不可见，请检查边界、缩放、位置和画布尺寸。");
         return false;
       }
       currentModel.scale.set(scale, scale);
-      return centerModel();
+      return centerModelInternal();
     }
 
-    function resetView() {
+    function resetViewInternal() {
       if (!currentModel) return false;
       currentModel.rotation = 0;
       currentModel.skew.set(0, 0);
       currentModel.scale.set(1, 1);
       currentModelBounds = readModelBounds();
-      return fitModelToView();
+      return fitModelToViewInternal();
     }
 
     function updateDebugPanel() {
@@ -156,17 +294,17 @@
       const bounds = currentModelBounds;
       const core = cubismCoreVersion();
       const lines = [
-        "Pixi initialized: " + (app ? "yes" : "no"),
-        "Canvas size: " + (canvas ? canvas.width + " x " + canvas.height : "0 x 0"),
-        "Stage children count: " + (app ? app.stage.children.length : 0),
-        "Model loaded: " + (currentModel ? "yes" : "no"),
-        "Model bounds: " + (bounds ? JSON.stringify(bounds) : "unavailable"),
-        "Model width / height: " + (bounds ? bounds.width + " / " + bounds.height : "0 / 0"),
-        "Model x / y: " + (currentModel ? currentModel.x + " / " + currentModel.y : "0 / 0"),
-        "Model scale x / y: " + (currentModel ? currentModel.scale.x + " / " + currentModel.scale.y : "0 / 0"),
-        "Ticker running: " + (app && app.ticker ? String(Boolean(app.ticker.started)) : "no"),
-        "Ticker FPS: " + (app && app.ticker && Number.isFinite(app.ticker.FPS) ? app.ticker.FPS.toFixed(1) : "0")
-        ,"Cubism Core version: " + (core ? core.major + "." + core.minor + "." + core.patch : "unknown")
+        "Pixi 已初始化：" + (app ? "是" : "否"),
+        "画布尺寸：" + (canvas ? canvas.width + " x " + canvas.height : "0 x 0"),
+        "舞台子对象数量：" + (app ? app.stage.children.length : 0),
+        "模型已加载：" + (currentModel ? "是" : "否"),
+        "模型边界：" + (bounds ? JSON.stringify(bounds) : "不可用"),
+        "模型宽度／高度：" + (bounds ? bounds.width + " / " + bounds.height : "0 / 0"),
+        "模型 X／Y：" + (currentModel ? currentModel.x + " / " + currentModel.y : "0 / 0"),
+        "模型缩放 X／Y：" + (currentModel ? currentModel.scale.x + " / " + currentModel.scale.y : "0 / 0"),
+        "Ticker 运行中：" + (app && app.ticker ? (app.ticker.started ? "是" : "否") : "否"),
+        "Ticker 帧率：" + (app && app.ticker && Number.isFinite(app.ticker.FPS) ? app.ticker.FPS.toFixed(1) : "0")
+        ,"Cubism Core 版本：" + (core ? core.major + "." + core.minor + "." + core.patch : "未知")
       ];
       debugNode.textContent = lines.join("\n");
     }
@@ -188,40 +326,125 @@
     window.fetch = diagnosticFetch;
 
     function networkFailureMessage(prefix, failure) {
-      return prefix + "\nHTTP status: " + failure.status + "\nRequest URL: " + failure.url +
-        "\nError text: " + (failure.errorText || "(empty response)");
+      return prefix + "\nHTTP 状态：" + failure.status + "\n请求地址：" + failure.url +
+        "\n错误内容：" + (failure.errorText || "（响应为空）");
+    }
+
+    function coreModelApi() {
+      return currentModel && currentModel.internalModel && currentModel.internalModel.coreModel;
+    }
+
+    function parameterIds() {
+      const core = coreModelApi();
+      const native = core && core.getModel && core.getModel();
+      const source = (native && native.parameters && native.parameters.ids) ||
+        (core && core._parameterIds) || [];
+      return Array.from(source, value => String(value && (value.s || value.id) || value));
+    }
+
+    function resolveParameterName(name) {
+      const ids = parameterIds();
+      return [name].concat(parameterAliases[name] || []).find(candidate => ids.includes(candidate)) || null;
+    }
+
+    function collectCapabilities() {
+      const settings = currentModel && currentModel.internalModel && currentModel.internalModel.settings;
+      const motions = settings && settings.motions && typeof settings.motions === "object"
+        ? Object.entries(settings.motions).map(([group, definitions]) => ({
+            group, entries: Array.from(definitions || [], (definition, index) => ({
+              index, name: definition.Name || definition.File || String(index)
+            }))
+          })) : [];
+      const expressions = Array.from(settings && settings.expressions || [], definition =>
+        definition.Name || definition.name || definition.File).filter(Boolean);
+      const knownIds = parameterIds();
+      const parameters = testedParameters.map(item => ({
+        name: item.name, effectiveName: resolveParameterName(item.name),
+        available: knownIds.length === 0 || Boolean(resolveParameterName(item.name))
+      }));
+      modelCapabilities = {motions, expressions, parameters};
+      capabilitiesNode.textContent = [
+        "可用动作：",
+        motions.length ? motions.map(item => "  " + (item.group || "(unnamed)") + ": " +
+          item.entries.map(entry => entry.index + "=" + entry.name).join(", ")).join("\n") : "  不可用",
+        "可用表情：",
+        expressions.length ? "  " + expressions.join(", ") : "  不可用",
+        "已知／测试参数：",
+        parameters.map(item => "  " + item.name + "：" + (item.available ? "可用" : "不可用")).join("\n")
+      ].join("\n");
+      initialParameters.clear();
+      parameterOverrides.clear();
+      const core = coreModelApi();
+      if (core && typeof core.getParameterValueById === "function") {
+        parameters.filter(item => item.available).forEach(item => {
+          try { initialParameters.set(item.name, core.getParameterValueById(item.effectiveName || item.name)); }
+          catch (_error) { /* capability remains best-effort */ }
+        });
+      }
+      return modelCapabilities;
+    }
+
+    function applyParameterOverrides() {
+      const core = coreModelApi();
+      if (!core || typeof core.setParameterValueById !== "function") return;
+      parameterOverrides.forEach((value, name) => core.setParameterValueById(name, value));
+    }
+
+    function nextRenderFrames(count) {
+      return new Promise(resolve => {
+        function step() { if (--count <= 0) resolve(); else requestAnimationFrame(step); }
+        requestAnimationFrame(step);
+      });
+    }
+
+    function visibleVerdict() {
+      const canvas = app && (app.view || app.canvas);
+      const bounds = readModelBounds();
+      return Boolean(!renderFailure && currentModel && currentModel.visible && currentModel.alpha > 0 &&
+        app && app.stage.children.includes(currentModel) && canvas && canvas.width > 0 && canvas.height > 0 && bounds);
     }
 
     async function loadModelAsync(model3JsonPath) {
       const modelUrl = normalizeModelUrl(model3JsonPath);
-      modelUrlNode.textContent = "Model URL: " + modelUrl;
+      currentModelUrl = modelUrl;
+      modelUrlNode.textContent = "模型地址：" + modelUrl;
       if (!runtimeReady()) return result(false, "runtime_missing", runtimeMessage);
-      if (!compatibleCore()) {
-        const core = cubismCoreVersion();
-        return result(false, "runtime_incompatible",
-          "Live2D rendering runtime is incompatible: Cubism Core " + core.major + "." +
-          core.minor + "." + core.patch +
-          " cannot be rendered by pixi-live2d-display 0.4.0. Use a licensed Cubism 4 Core runtime.");
-      }
       try {
+        renderFailure = null;
+        window.__maidieLive2DModel = null;
         lastNetworkFailure = null;
         const preflight = await diagnosticFetch(modelUrl, {cache: "no-store"});
         if (!preflight.ok) return result(false, "model_preflight_failed",
-          networkFailureMessage("Live2D model preflight failed.", lastNetworkFailure));
+          networkFailureMessage("Live2D 模型预检失败。", lastNetworkFailure));
         ensurePixiApplication();
+        const core = cubismCoreVersion();
+        if (core && core.major > 4) {
+          return result(false, "runtime_incompatible",
+            "Cubism Core " + core.major + "." + core.minor + "." + core.patch +
+            " 与 pixi-live2d-display 0.4.0 不兼容，请安装有合法许可的 Cubism 4.2 Core 运行库。");
+        }
         if (currentModel) {
           app.stage.removeChild(currentModel);
           currentModel.destroy({children: true});
         }
         currentModel = await PIXI.live2d.Live2DModel.from(modelUrl);
+        if (currentModel.internalModel && typeof currentModel.internalModel.on === "function") {
+          currentModel.internalModel.on("beforeModelUpdate", applyParameterOverrides);
+        }
         currentModel.visible = true;
         currentModel.alpha = 1;
         currentModel.anchor && currentModel.anchor.set(0, 0);
         app.stage.addChild(currentModel);
         if (app.stage.children.indexOf(currentModel) < 0 || app.stage.children.length <= 0) {
-          return result(false, "model_not_on_stage", "Model loaded but was not added to the Pixi stage.");
+          return result(false, "model_not_on_stage", "模型已加载，但未添加到 Pixi 舞台。");
         }
-        if (!fitModelToView()) return previewState;
+        if (!fitModelToViewInternal()) return previewState;
+        collectCapabilities();
+        syncParameterSliders();
+        await nextRenderFrames(2);
+        if (!visibleVerdict()) {
+          throw new Error(renderFailure || "模型未通过可见性渲染检查。");
+        }
         window.__maidieLive2DModel = currentModel;
         console.info("model added to stage", currentModel);
         console.info("stage children count", app.stage.children.length);
@@ -230,18 +453,24 @@
         console.info("final model position", currentModel.x, currentModel.y);
         console.info("final model scale", currentModel.scale.x, currentModel.scale.y);
         updateDebugPanel();
-        return result(true, "loaded", "Live2D model loaded and visible.");
+        return result(true, "loaded", "Live2D 模型已加载并可见。");
       } catch (error) {
+        console.error("Live2D model load failed", error);
+        if (currentModel && app && app.stage.children.includes(currentModel)) app.stage.removeChild(currentModel);
+        currentModel = null;
+        currentModelBounds = null;
+        window.__maidieLive2DModel = null;
         if (lastNetworkFailure) return result(false, "resource_load_failed",
-          networkFailureMessage("Live2D resource load failed.", lastNetworkFailure));
-        return result(false, "model_load_failed", "Live2D model load failed: " + String(error));
+          networkFailureMessage("Live2D 资源加载失败。", lastNetworkFailure));
+        return result(false, "model_load_failed", "Live2D 模型加载失败：" + String(error));
       }
     }
 
-    window.loadModel = function(model3JsonPath) {
+    // Keep the public API promise-based so callers can observe the final state and errors.
+    window.loadModel = async function(model3JsonPath) {
       if (!runtimeReady()) return result(false, "runtime_missing", runtimeMessage);
-      loadModelAsync(model3JsonPath);
-      return result(true, "loading", "Loading Live2D model…");
+      result(true, "loading", "正在加载 Live2D 模型…");
+      return await loadModelAsync(model3JsonPath);
     };
 
     window.getPreviewState = function() {
@@ -258,39 +487,410 @@
       });
     };
 
-    window.setExpression = function(name) {
-      if (!currentModel) return result(false, "model_not_loaded", "No Live2D model is loaded.");
-      try { currentModel.expression(name); return result(true, "expression_set", "Expression set: " + name); }
-      catch (error) { return result(false, "expression_failed", String(error)); }
+    function findMotionGroup(requested) {
+      const normalize = value => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const wanted = normalize(requested);
+      const aliases = wanted === "tapbody" ? ["tapbody", "tap", "flick"] : [wanted];
+      return modelCapabilities.motions.find(item =>
+        aliases.includes(normalize(item.group)));
+    }
+
+    window.playMotion = async function(groupOrName, indexOrName) {
+      const action = "playMotion(" + groupOrName + ")";
+      const missing = requireModel(action); if (missing) return missing;
+      try {
+        const group = findMotionGroup(groupOrName);
+        if (!group || !group.entries.length) {
+          return controlResult(false, action, "not_available", "动作不可用：" + groupOrName);
+        }
+        let index = Number.isInteger(indexOrName) ? indexOrName : 0;
+        if (typeof indexOrName === "string") {
+          const found = group.entries.find(entry => entry.name === indexOrName || entry.name.includes(indexOrName));
+          if (!found) return controlResult(false, action, "not_available", "动作条目不可用：" + indexOrName);
+          index = found.index;
+        }
+        let started;
+        if (typeof currentModel.motion === "function") {
+          started = await currentModel.motion(group.group, index);
+        } else {
+          const manager = currentModel.internalModel && currentModel.internalModel.motionManager;
+          if (!manager || typeof manager.startMotion !== "function") {
+            return controlResult(false, action, "not_available", "动作 API 不可用。");
+          }
+          started = await manager.startMotion(group.group, index);
+        }
+        if (started === false) return controlResult(false, action, "motion_rejected", "动作管理器拒绝播放该动作。");
+        return controlResult(true, action, "motion_started", group.group + " #" + index);
+      } catch (error) { return controlResult(false, action, "motion_failed", "动作播放失败。", error); }
+    };
+
+    window.playRandomMotion = async function() {
+      const action = "playRandomMotion";
+      const missing = requireModel(action); if (missing) return missing;
+      try {
+        const groups = modelCapabilities.motions.filter(item => item.entries.length);
+        if (!groups.length) return controlResult(false, action, "not_available", "该模型没有可用动作。");
+        const manager = currentModel.internalModel && currentModel.internalModel.motionManager;
+        if (manager && typeof manager.startRandomMotion === "function") {
+          const group = groups[Math.floor(Math.random() * groups.length)];
+          await manager.startRandomMotion(group.group);
+          return controlResult(true, action, "motion_started", "Random motion from " + group.group);
+        }
+        const group = groups[Math.floor(Math.random() * groups.length)];
+        const entry = group.entries[Math.floor(Math.random() * group.entries.length)];
+        return await window.playMotion(group.group, entry.index);
+      } catch (error) { return controlResult(false, action, "motion_failed", "随机动作播放失败。", error); }
+    };
+
+    window.stopMotion = function() {
+      const action = "stopMotion";
+      const missing = requireModel(action); if (missing) return missing;
+      try {
+        const manager = currentModel.internalModel && currentModel.internalModel.motionManager;
+        const queue = manager && manager.queueManager;
+        if (manager && typeof manager.stopAllMotions === "function") manager.stopAllMotions();
+        else if (queue && typeof queue.stopAllMotions === "function") queue.stopAllMotions();
+        else return controlResult(false, action, "not_available", "停止动作 API 不可用。");
+        return controlResult(true, action, "motion_stopped", "已停止全部动作。");
+      } catch (error) { return controlResult(false, action, "motion_stop_failed", "Could not stop motions.", error); }
+    };
+
+    function findExpressionName(candidates) {
+      const lowered = candidates.map(value => value.toLowerCase());
+      return modelCapabilities.expressions.find(name => {
+        const value = String(name).toLowerCase();
+        return lowered.some(candidate => value === candidate || value.includes(candidate));
+      });
+    }
+
+    window.setExpression = async function(name) {
+      const action = "setExpression(" + name + ")";
+      const missing = requireModel(action); if (missing) return missing;
+      if (!modelCapabilities.expressions.includes(name)) {
+        return controlResult(false, action, "not_available", "表情不可用：" + name);
+      }
+      try {
+        if (typeof currentModel.expression === "function") await currentModel.expression(name);
+        else {
+          const manager = currentModel.internalModel && currentModel.internalModel.motionManager;
+          const expressions = manager && manager.expressionManager;
+          if (!expressions || typeof expressions.setExpression !== "function") {
+            return controlResult(false, action, "not_available", "表情 API 不可用。");
+          }
+          await expressions.setExpression(name);
+        }
+        return controlResult(true, action, "expression_set", name);
+      } catch (error) { return controlResult(false, action, "expression_failed", "表情切换失败。", error); }
+    };
+
+    window.clearExpression = function() {
+      const action = "clearExpression";
+      const missing = requireModel(action); if (missing) return missing;
+      try {
+        const manager = currentModel.internalModel && currentModel.internalModel.motionManager;
+        const expressions = manager && manager.expressionManager;
+        if (expressions && typeof expressions.stopAllExpressions === "function") expressions.stopAllExpressions();
+        else if (expressions && expressions.queueManager && typeof expressions.queueManager.stopAllMotions === "function") {
+          expressions.queueManager.stopAllMotions();
+        } else return controlResult(false, action, "not_available", "清除表情 API 不可用。");
+        return controlResult(true, action, "expression_cleared", "已清除表情。");
+      } catch (error) { return controlResult(false, action, "expression_clear_failed", "Could not clear expression.", error); }
     };
 
     window.setParameter = function(name, value) {
-      if (!currentModel) return result(false, "model_not_loaded", "No Live2D model is loaded.");
+      const action = "setParameter(" + name + ")";
+      const missing = requireModel(action); if (missing) return missing;
+      const capability = modelCapabilities.parameters.find(item => item.name === name);
+      if (capability && !capability.available) {
+        return controlResult(false, action, "not_available", "参数不可用：" + name);
+      }
       try {
-        const core = currentModel.internalModel && currentModel.internalModel.coreModel;
-        if (!core || !core.setParameterValueById) throw new Error("Core model parameter API unavailable.");
-        core.setParameterValueById(name, Number(value));
-        return result(true, "parameter_set", "Parameter set: " + name);
-      } catch (error) { return result(false, "parameter_failed", String(error)); }
+        const core = coreModelApi();
+        if (!core || typeof core.setParameterValueById !== "function") {
+          return controlResult(false, action, "not_available", "参数 API 不可用。");
+        }
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) throw new TypeError("参数值必须是有限数值。");
+        const effectiveName = capability && capability.effectiveName || resolveParameterName(name) || name;
+        parameterOverrides.set(effectiveName, numeric);
+        core.setParameterValueById(effectiveName, numeric);
+        return controlResult(true, action, "parameter_set", name + " = " + numeric.toFixed(2));
+      } catch (error) { return controlResult(false, action, "parameter_failed", "Could not set parameter.", error); }
     };
 
-    document.getElementById("fit-model").addEventListener("click", fitModelToView);
-    document.getElementById("center-model").addEventListener("click", centerModel);
-    document.getElementById("reset-view").addEventListener("click", resetView);
+    window.resetParameters = function() {
+      const action = "resetParameters";
+      const missing = requireModel(action); if (missing) return missing;
+      const results = testedParameters.map(item => window.setParameter(
+        item.name, initialParameters.has(item.name) ? initialParameters.get(item.name) : item.reset));
+      syncParameterSliders();
+      const failures = results.filter(item => !item.ok && item.code !== "not_available");
+      return controlResult(!failures.length, action, failures.length ? "parameter_reset_failed" : "parameters_reset",
+        failures.length ? failures.length + " parameters failed." : "Known parameters reset.");
+    };
+
+    window.fitModelToView = function() {
+      const missing = requireModel("fitModelToView"); if (missing) return missing;
+      try { return controlResult(fitModelToViewInternal(), "fitModelToView", "view_fitted", "Model fitted to view."); }
+      catch (error) { return controlResult(false, "fitModelToView", "view_failed", "Could not fit model.", error); }
+    };
+    window.centerModel = function() {
+      const missing = requireModel("centerModel"); if (missing) return missing;
+      try { return controlResult(centerModelInternal(), "centerModel", "view_centered", "Model centered."); }
+      catch (error) { return controlResult(false, "centerModel", "view_failed", "Could not center model.", error); }
+    };
+    window.resetView = function() {
+      const missing = requireModel("resetView"); if (missing) return missing;
+      try { return controlResult(resetViewInternal(), "resetView", "view_reset", "View reset."); }
+      catch (error) { return controlResult(false, "resetView", "view_failed", "Could not reset view.", error); }
+    };
+
+    window.getModelDiagnostics = function() {
+      return Object.assign({}, window.getPreviewState(), {capabilities: modelCapabilities,
+        lastControlAction: controlActionNode.textContent, lastControlResult: controlResultNode.textContent,
+        lastControlError: controlErrorNode.textContent, visible: visibleVerdict(),
+        parameterOverrides: Object.fromEntries(parameterOverrides), mouseFollowEnabled});
+    };
+
+    window.startMouthTest = function() {
+      const action = "startMouthTest";
+      const missing = requireModel(action); if (missing) return missing;
+      if (mouthAnimationFrame) return controlResult(true, action, "mouth_test_running", "嘴型测试已在运行。");
+      const startedAt = performance.now();
+      function animate(now) {
+        window.setParameter("ParamMouthOpenY", (Math.sin((now - startedAt) / 110) + 1) / 2);
+        mouthAnimationFrame = requestAnimationFrame(animate);
+      }
+      mouthAnimationFrame = requestAnimationFrame(animate);
+      return controlResult(true, action, "mouth_test_started", "嘴型测试已开始。");
+    };
+
+    window.stopMouthTest = function() {
+      if (mouthAnimationFrame) cancelAnimationFrame(mouthAnimationFrame);
+      mouthAnimationFrame = 0;
+      const reset = currentModel ? window.setParameter("ParamMouthOpenY", 0) : null;
+      if (reset && !reset.ok) return reset;
+      return controlResult(true, "stopMouthTest", "mouth_test_stopped", "嘴型测试已停止，嘴巴参数已恢复为 0。");
+    };
+
+    function restoreMouseFollowParameters() {
+      if (!currentModel) return;
+      window.setParameter("ParamAngleX", 0);
+      window.setParameter("ParamAngleY", 0);
+    }
+
+    window.setMouseFollow = function(enabled) {
+      mouseFollowEnabled = Boolean(enabled);
+      document.getElementById("mouse-follow").checked = mouseFollowEnabled;
+      if (!mouseFollowEnabled) restoreMouseFollowParameters();
+      return controlResult(true, "setMouseFollow", mouseFollowEnabled ? "mouse_follow_enabled" : "mouse_follow_disabled",
+        mouseFollowEnabled ? "鼠标跟随已启用。" : "鼠标跟随已关闭。");
+    };
+
+    function updateSemanticPanel(state, profile, motion, expression, parameters, fallback, intensity) {
+      semanticCurrentNode.textContent = state;
+      semanticMotionNode.textContent = motion || "无";
+      semanticExpressionNode.textContent = expression || "无";
+      semanticParametersNode.textContent = parameters.length ? parameters.join("，") : "无";
+      semanticProfileNode.textContent = state in ACTION_PROFILES ? state : "无";
+      semanticIntensityNode.textContent = Number(intensity || profile && profile.intensity || 0).toFixed(2);
+      semanticDurationNode.textContent = profile ? profile.duration_ms + " ms / " + profile.easing : "无";
+      semanticFallbackNode.textContent = fallback || "无";
+    }
+
+    function easedProgress(progress, easing) {
+      if (easing === "easeInOut") return progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+      if (easing === "easeOutBack") {
+        const c1 = 1.70158, c3 = c1 + 1;
+        return 1 + c3 * Math.pow(progress - 1, 3) + c1 * Math.pow(progress - 1, 2);
+      }
+      return 1 - Math.pow(1 - progress, 3);
+    }
+
+    function scaledProfileValue(name, value, intensity) {
+      if (name === "ParamEyeLOpen" || name === "ParamEyeROpen") {
+        return Math.max(0, Math.min(1, 1 + (value - 1) * intensity));
+      }
+      if (name === "ParamMouthOpenY") return Math.max(0, Math.min(1, value * intensity));
+      return value * intensity;
+    }
+
+    function animateProfileParameters(profile, intensity, changes, fallback, runId) {
+      const entries = Object.entries(profile.parameters || {});
+      if (!entries.length) return Promise.resolve();
+      const starts = new Map(entries.map(([name]) => {
+        const capability = modelCapabilities.parameters.find(item => item.name === name);
+        const effective = capability && capability.effectiveName;
+        const current = effective && parameterOverrides.has(effective) ? parameterOverrides.get(effective) :
+          (initialParameters.has(name) ? initialParameters.get(name) : 0);
+        return [name, Number(current) || 0];
+      }));
+      const startedAt = performance.now();
+      return new Promise(resolve => {
+        function step(now) {
+          if (runId !== semanticRunId) { resolve(); return; }
+          const progress = Math.min(1, (now - startedAt) / Math.max(1, profile.duration_ms));
+          const eased = easedProgress(progress, profile.easing);
+          entries.forEach(([name, rawTarget]) => {
+            const target = scaledProfileValue(name, rawTarget, intensity);
+            const value = starts.get(name) + (target - starts.get(name)) * eased;
+            const applied = window.setParameter(name, value);
+            if (!applied.ok && !fallback.includes(name + " 不可用")) fallback.push(name + " 不可用");
+          });
+          if (progress < 1) requestAnimationFrame(step); else resolve();
+        }
+        requestAnimationFrame(step);
+      }).then(() => entries.forEach(([name, value]) => changes.push(
+        name + "=" + scaledProfileValue(name, value, intensity).toFixed(2))));
+    }
+
+    window.applySemanticState = async function(state, intensityOverride) {
+      const runId = ++semanticRunId;
+      const normalized = String(state || "").toLowerCase();
+      const action = "applySemanticState(" + normalized + ")";
+      const missing = requireModel(action); if (missing) return missing;
+      const profile = ACTION_PROFILES[normalized];
+      if (!profile) {
+        updateSemanticPanel(normalized || "未知", null, "", "", [], "未知语义状态", 0);
+        return controlResult(false, action, "not_available", "未知语义状态：" + state);
+      }
+      const requestedIntensity = Number(intensityOverride);
+      const intensity = Number.isFinite(requestedIntensity) && requestedIntensity > 0
+        ? requestedIntensity : profile.intensity;
+      let motion = "";
+      let expression = "";
+      const parameters = [];
+      const fallback = [];
+      try {
+        if (normalized !== "speaking") window.stopMouthTest();
+        if (normalized === "idle") window.resetParameters();
+        for (const candidate of profile.expression_candidates) {
+          const name = findExpressionName([candidate]);
+          if (!name) continue;
+          const applied = await window.setExpression(name);
+          if (applied.ok) { expression = name; break; }
+        }
+        if (runId !== semanticRunId) return {ok: false, code: "semantic_state_superseded", state: normalized};
+        for (const candidate of profile.motion_candidates) {
+          const applied = candidate === "__random__" ? await window.playRandomMotion() : await window.playMotion(candidate);
+          if (applied.ok) { motion = applied.message; break; }
+        }
+        if (runId !== semanticRunId) return {ok: false, code: "semantic_state_superseded", state: normalized};
+        if (profile.expression_candidates.length && !expression) fallback.push("候选表情不可用");
+        if (profile.motion_candidates.length && !motion) fallback.push("候选动作不可用");
+        if ((!expression && profile.expression_candidates.length) || (!motion && profile.motion_candidates.length)) {
+          fallback.push(profile.fallback_reason);
+        }
+        await animateProfileParameters(profile, intensity, parameters, fallback, runId);
+        if (runId !== semanticRunId) return {ok: false, code: "semantic_state_superseded", state: normalized};
+        if (normalized === "speaking") {
+          window.startMouthTest();
+          parameters.push("ParamMouthOpenY=动画");
+        }
+        updateSemanticPanel(normalized, profile, motion, expression, parameters, fallback.join("；"), intensity);
+        return controlResult(true, action, "semantic_state_applied", "已应用语义状态：" + normalized);
+      } catch (error) {
+        updateSemanticPanel(normalized, profile, motion, expression, parameters, String(error), intensity);
+        return controlResult(false, action, "semantic_state_failed", "语义状态应用失败。", error);
+      }
+    };
+
+    window.reset = function() {
+      window.stopMouthTest();
+      window.setMouseFollow(false);
+      window.resetParameters();
+      return window.resetView();
+    };
+
+    function createParameterControls() {
+      const root = document.getElementById("parameter-controls");
+      testedParameters.forEach(item => {
+        const row = document.createElement("label");
+        row.className = "parameter";
+        row.textContent = item.name;
+        const slider = document.createElement("input");
+        slider.type = "range"; slider.id = "parameter-" + item.name;
+        slider.min = item.min; slider.max = item.max; slider.step = item.step; slider.value = item.reset;
+        const output = document.createElement("output"); output.textContent = String(item.reset);
+        slider.addEventListener("input", () => {
+          output.textContent = Number(slider.value).toFixed(item.step < 1 ? 2 : 0);
+          window.setParameter(item.name, slider.value);
+        });
+        row.append(slider, output); root.appendChild(row);
+      });
+    }
+
+    function syncParameterSliders() {
+      testedParameters.forEach(item => {
+        const slider = document.getElementById("parameter-" + item.name);
+        if (!slider) return;
+        slider.value = initialParameters.has(item.name) ? initialParameters.get(item.name) : item.reset;
+        slider.nextElementSibling.textContent = Number(slider.value).toFixed(item.step < 1 ? 2 : 0);
+      });
+    }
+
+    createParameterControls();
+    document.querySelectorAll("[data-semantic-state]").forEach(button => {
+      button.addEventListener("click", () => window.applySemanticState(button.dataset.semanticState));
+    });
+    document.getElementById("reload-model").addEventListener("click", () => currentModelUrl && window.loadModel(currentModelUrl));
+    document.getElementById("fit-model").addEventListener("click", window.fitModelToView);
+    document.getElementById("center-model").addEventListener("click", window.centerModel);
+    document.getElementById("reset-view").addEventListener("click", window.resetView);
+    document.getElementById("play-idle").addEventListener("click", () => window.playMotion("Idle"));
+    document.getElementById("play-tap-body").addEventListener("click", () => window.playMotion("TapBody"));
+    document.getElementById("play-random").addEventListener("click", window.playRandomMotion);
+    document.getElementById("stop-motion").addEventListener("click", window.stopMotion);
+    document.getElementById("expression-happy").addEventListener("click", async () => {
+      const name = findExpressionName(["happy", "smile", "joy", "f01"]);
+      return name ? window.setExpression(name) : controlResult(false, "setHappyExpression", "not_available", "开心表情不可用。");
+    });
+    document.getElementById("expression-normal").addEventListener("click", async () => {
+      const name = findExpressionName(["normal", "default", "neutral"]);
+      return name ? window.setExpression(name) : controlResult(false, "setNormalExpression", "not_available", "普通表情不可用。");
+    });
+    document.getElementById("expression-sad").addEventListener("click", async () => {
+      const name = findExpressionName(["sad", "confused", "angry", "worry"]);
+      return name ? window.setExpression(name) : controlResult(false, "setSadExpression", "not_available", "难过／困惑表情不可用。");
+    });
+    document.getElementById("clear-expression").addEventListener("click", window.clearExpression);
+    document.getElementById("reset-parameters").addEventListener("click", window.resetParameters);
+    document.getElementById("start-mouth-test").addEventListener("click", window.startMouthTest);
+    document.getElementById("stop-mouth-test").addEventListener("click", window.stopMouthTest);
+    document.getElementById("mouse-follow").addEventListener("change", event => window.setMouseFollow(event.target.checked));
+    container.addEventListener("mousemove", event => {
+      if (!mouseFollowEnabled || !currentModel) return;
+      const rect = container.getBoundingClientRect();
+      window.setParameter("ParamAngleX", ((event.clientX - rect.left) / rect.width * 2 - 1) * 30);
+      window.setParameter("ParamAngleY", -((event.clientY - rect.top) / rect.height * 2 - 1) * 30);
+    });
+    container.addEventListener("mouseleave", () => { if (mouseFollowEnabled) restoreMouseFollowParameters(); });
     window.addEventListener("error", function(event) {
       const text = String(event.error && event.error.stack || event.message || "");
       if (text.includes("doDrawModel")) {
+        renderFailure = text;
         result(false, "render_failed",
-          "Model loaded but not visible. Cubism renderer failed in doDrawModel; check Core/framework compatibility.");
+          "模型已加载但不可见。Cubism 渲染器在 doDrawModel 中失败，请检查 Core／Framework 兼容性。");
       }
     });
-    if (!runtimeReady()) result(false, "runtime_missing", runtimeMessage);
-    const queryModel = new URLSearchParams(window.location.search).get("model");
-    if (queryModel) window.loadModel(queryModel);
+    async function bootstrap() {
+      if (!runtimeReady()) {
+        result(false, "runtime_missing", runtimeMessage);
+        return;
+      }
+      const queryModel = new URLSearchParams(window.location.search).get("model");
+      if (queryModel) await window.loadModel(queryModel);
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", bootstrap, {once: true});
+    } else {
+      bootstrap();
+    }
     window.addEventListener("resize", function() {
       if (!app) return;
       ensurePixiApplication();
-      if (currentModel) fitModelToView();
+      if (currentModel) fitModelToViewInternal();
     });
     setInterval(updateDebugPanel, 500);
     updateDebugPanel();
