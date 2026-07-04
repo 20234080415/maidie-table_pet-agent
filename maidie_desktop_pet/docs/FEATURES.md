@@ -9,6 +9,8 @@
 
 ## 动画系统
 
+Sprite / WebP 仍是默认且完整的桌宠动画后端。实验性的 `live2d_web` 支持扫描外部目录中的 `*.model3.json`、注册多个模型、选择当前模型和显示入口路径。第一阶段不会替换主桌宠渲染；模型失效或缺少可选的 PyQt6-WebEngine 时自动保持 Sprite。第三方资源不复制进仓库，详见 [`assets/live2d/README.md`](../assets/live2d/README.md)。
+
 主图集负责 `idle`、行走、奔跑、思考、说话、等待、成功和失败等状态。额外动作使用 `assets/actions/` 下的数据驱动 WebP 动作条，可配置帧率、冷却和优先级。详见[动作系统](ACTIONS.md)。
 
 ## 鼠标和键盘互动

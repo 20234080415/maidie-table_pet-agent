@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Maidie Project Graph</title>
+  <style>
+    body{font:16px/1.55 system-ui,sans-serif;max-width:1000px;margin:40px auto;padding:0 20px;color:#283044;background:#faf8fc}
+    h1{color:#7a416f}.note{padding:12px 16px;background:#fff3cd;border-radius:8px}
+    .flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:24px 0}
+    section{background:white;border:1px solid #eadfea;border-radius:10px;padding:14px;box-shadow:0 2px 8px #46253b0d}
+    code{color:#7a416f}li{margin:.35rem 0}
+  </style>
+</head>
+<body>
+  <h1>Maidie Desktop Pet 项目图谱</h1>
+  <p class="note">这是 Graphify 不可用时生成的手工回退视图，不是 Graphify CLI 原生输出。机器可读数据见 <a href="graph.json">graph.json</a>。</p>
+  <div class="flow">
+    <section><strong>入口 / UI</strong><br><code>main.py → ui/ → core/pet.py</code></section>
+    <section><strong>Behavior</strong><br><code>state / movement / experience / proactive</code></section>
+    <section><strong>Agent</strong><br><code>Router → Planner → Executor → Synthesizer</code></section>
+    <section><strong>Tools</strong><br><code>ToolRegistry → time / weather / search / screen / memory / system / coding_agent</code></section>
+    <section><strong>Vision</strong><br><code>awareness → ScreenTool → VisionService → Qwen VL</code></section>
+    <section><strong>Storage</strong><br><code>SQLite memory / scheduled task JSON</code></section>
+  </div>
+  <h2>关键边界</h2>
+  <ul>
+    <li><code>core/brain/</code> 是生产 Agent 链路；旧目录仅兼容。</li>
+    <li>工具只返回结构化事实，Synthesizer 负责最终话术。</li>
+    <li>Coding Agent 默认关闭，限定 workspace，并强制 dry-run。</li>
+    <li>后台任务不得直接更新 PyQt 控件。</li>
+  </ul>
+  <p>完整结论与重新生成方法见 <a href="GRAPH_REPORT.md">GRAPH_REPORT.md</a>。</p>
+</body>
+</html>

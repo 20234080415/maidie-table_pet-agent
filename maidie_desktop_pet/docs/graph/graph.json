@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "project": "Maidie Desktop Pet",
+    "generator": "manual fallback analysis",
+    "graphify_cli": false,
+    "entrypoint": "main.py"
+  },
+  "nodes": [
+    {"id": "main", "path": "main.py", "layer": "composition"},
+    {"id": "ui", "path": "ui/", "layer": "ui"},
+    {"id": "pet", "path": "core/pet.py", "layer": "coordination"},
+    {"id": "behavior", "path": "core/behavior.py; core/experience/; core/proactive/", "layer": "behavior"},
+    {"id": "router", "path": "core/brain/router.py", "layer": "agent"},
+    {"id": "planner", "path": "core/brain/planner.py", "layer": "agent"},
+    {"id": "executor", "path": "core/brain/executor.py", "layer": "agent"},
+    {"id": "registry", "path": "core/tools/registry.py", "layer": "tools"},
+    {"id": "tools", "path": "core/tools/", "layer": "tools"},
+    {"id": "synthesizer", "path": "core/brain/synthesizer.py", "layer": "agent"},
+    {"id": "vision", "path": "core/vision/; core/awareness/", "layer": "vision"},
+    {"id": "memory", "path": "memory/", "layer": "storage"},
+    {"id": "coding_agent", "path": "core/tools/coding_agent_*.py", "layer": "integration"}
+  ],
+  "edges": [
+    {"from": "main", "to": "ui", "relation": "constructs"},
+    {"from": "main", "to": "pet", "relation": "constructs"},
+    {"from": "pet", "to": "behavior", "relation": "coordinates"},
+    {"from": "pet", "to": "router", "relation": "submits input"},
+    {"from": "router", "to": "planner", "relation": "plans"},
+    {"from": "planner", "to": "executor", "relation": "structured plan"},
+    {"from": "executor", "to": "registry", "relation": "validated lookup"},
+    {"from": "registry", "to": "tools", "relation": "registers"},
+    {"from": "tools", "to": "vision", "relation": "screen tool delegates"},
+    {"from": "tools", "to": "memory", "relation": "memory tool delegates"},
+    {"from": "tools", "to": "coding_agent", "relation": "contains adapter"},
+    {"from": "executor", "to": "synthesizer", "relation": "structured facts"},
+    {"from": "synthesizer", "to": "ui", "relation": "display result"}
+  ]
+}
