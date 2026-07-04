@@ -171,6 +171,7 @@ class SettingsDialog(QDialog):
         self._live2d_preview_windows: list[QDialog] = []
         self._live2d_preview_servers: list[object] = []
         self._live2d_pet_window: QWidget | None = None
+        self._live2d_appearance_window: QWidget | None = None
         self.setWindowTitle("Maidie 设置")
         flags = self.windowFlags()
         flags &= ~Qt.WindowType.WindowStaysOnTopHint
@@ -377,6 +378,9 @@ class SettingsDialog(QDialog):
         pet_open_btn = QPushButton("打开 Live2D 实验窗口")
         pet_open_btn.setObjectName("openLive2DPetWindowButton")
         pet_open_btn.clicked.connect(self._open_live2d_pet_window)
+        pet_appearance_btn = QPushButton("打开 Live2D 小人窗口")
+        pet_appearance_btn.setObjectName("openLive2DAppearanceWindowButton")
+        pet_appearance_btn.clicked.connect(self._open_live2d_appearance_window)
         pet_speaking_btn = QPushButton("测试 speaking")
         pet_speaking_btn.setObjectName("testLive2DSpeakingButton")
         pet_speaking_btn.clicked.connect(lambda: self._test_live2d_pet_state("speaking"))
@@ -396,6 +400,7 @@ class SettingsDialog(QDialog):
         pet_layout = QHBoxLayout(pet_row)
         pet_layout.setContentsMargins(0, 0, 0, 0)
         pet_layout.addWidget(pet_open_btn)
+        pet_layout.addWidget(pet_appearance_btn)
         pet_layout.addWidget(pet_speaking_btn)
         pet_layout.addWidget(pet_confused_btn)
         pet_layout.addWidget(pet_success_btn)
@@ -592,6 +597,38 @@ class SettingsDialog(QDialog):
         window.show()
         self.live2d_preview_label.setText(str(result.get("message", "实验窗口已打开。")))
 
+    def _open_live2d_appearance_window(self) -> None:
+        model_id = str(self.live2d_model.currentData() or "")
+        model = next((item for item in self.live2d_registry.list_models()
+                      if item.id == model_id), None)
+        window, result = create_live2d_pet_window(model, self, mode="pet")
+        if window is None:
+            self.live2d_preview_label.setText(str(result.get("message", "无法创建小人窗口。")))
+            return
+        if hasattr(window, "set_callbacks"):
+
+            def _open_settings() -> None:
+                self.show()
+                self.raise_()
+                self.activateWindow()
+
+            def _switch_to_sprite() -> None:
+                self._fallback_to_sprite()
+                self.controller.apply_settings(
+                    {"animation_backend": "sprite"})
+                QMessageBox.information(
+                    window, "已切回 Sprite",
+                    "配置已保存为 Sprite 后端。\n请重启 Maidie 使设置生效。"
+                )
+
+            window.set_callbacks(
+                open_settings=_open_settings,
+                switch_to_sprite=_switch_to_sprite,
+            )
+        self._live2d_appearance_window = window
+        window.show()
+        self.live2d_preview_label.setText(str(result.get("message", "小人窗口已打开。")))
+
     def _test_live2d_pet_state(self, state: str) -> None:
         if self._live2d_pet_window is None:
             self.live2d_preview_label.setText("请先打开 Live2D 实验窗口。")
@@ -609,7 +646,10 @@ class SettingsDialog(QDialog):
         if self._live2d_pet_window is not None:
             self._live2d_pet_window.close()
             self._live2d_pet_window = None
-            self.live2d_preview_label.setText("Live2D 实验窗口已关闭。")
+        if self._live2d_appearance_window is not None:
+            self._live2d_appearance_window.close()
+            self._live2d_appearance_window = None
+        self.live2d_preview_label.setText("Live2D 实验窗口已关闭。")
 
     def _fallback_to_sprite(self) -> None:
         if hasattr(self, "animation_backend"):
@@ -1010,4 +1050,7 @@ class SettingsDialog(QDialog):
         if self._live2d_pet_window is not None:
             self._live2d_pet_window.close()
             self._live2d_pet_window = None
+        if self._live2d_appearance_window is not None:
+            self._live2d_appearance_window.close()
+            self._live2d_appearance_window = None
         super().closeEvent(event)

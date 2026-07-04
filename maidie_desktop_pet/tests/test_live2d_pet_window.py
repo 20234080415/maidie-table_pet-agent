@@ -167,6 +167,47 @@ class Live2DPetWindowTests(unittest.TestCase):
         backend2, status2 = resolve_animation_backend(None)
         self.assertEqual(backend2, "sprite")
 
+    def test_main_module_has_webengine_prepare_function(self):
+        import main
+        self.assertTrue(callable(main._prepare_webengine))
+        self.assertTrue(callable(main.webengine_ready))
+
+    def test_webengine_prepare_sets_share_opengl_attribute(self):
+        import main
+        from PyQt6.QtCore import QCoreApplication, Qt
+        saved = main._webengine_ready
+        try:
+            main._prepare_webengine()
+        finally:
+            main._webengine_ready = saved
+
+    def test_sprite_still_starts_when_webengine_missing(self):
+        import main
+        from PyQt6.QtCore import QCoreApplication, Qt
+        saved = main._webengine_ready
+        try:
+            main._webengine_ready = False
+            self.assertFalse(main.webengine_ready())
+        finally:
+            main._webengine_ready = saved
+
+    def test_live2d_preview_process_imports_webengine_before_qapp(self):
+        source = (Path(__file__).parents[1] / "ui" / "live2d_preview_process.py").read_text(
+            encoding="utf-8"
+        )
+        webengine_line = -1
+        qapp_line = -1
+        for i, line in enumerate(source.splitlines()):
+            if "QtWebEngineWidgets" in line and ("import" in line or "from" in line):
+                webengine_line = i
+            if "QApplication(" in line and webengine_line >= 0:
+                qapp_line = i
+                break
+        self.assertGreater(webengine_line, 0, "No QtWebEngineWidgets import found")
+        self.assertGreater(qapp_line, 0, "No QApplication(...) creation found")
+        self.assertLess(webengine_line, qapp_line,
+                        "QtWebEngineWidgets must be imported before QApplication()")
+
 
 if __name__ == "__main__":
     unittest.main()

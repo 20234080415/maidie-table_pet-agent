@@ -73,7 +73,7 @@ class Live2DPreviewServer:
     def session_id(self) -> str:
         return self._session_id
 
-    def viewer_url(self) -> str:
+    def viewer_url(self, mode: str = "preview") -> str:
         model_id = quote(self.model.id, safe="")
         filename = quote(self.model_entry.name, safe="")
         model_url = f"/model/{model_id}/{filename}"
@@ -83,6 +83,8 @@ class Live2DPreviewServer:
         )
         if self._session_id:
             url += f"&session={self._session_id}"
+        if mode:
+            url += f"&mode={mode}"
         return url
 
     def enqueue_command(self, session_id: str, command: dict[str, Any]) -> bool:

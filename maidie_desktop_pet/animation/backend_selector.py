@@ -41,7 +41,7 @@ def try_create_live2d_window(
             "message": "无法导入 Live2DPetWindow 模块。",
         }
 
-    window, result = create_live2d_pet_window(model, mode="pet")
+    window, result = create_live2d_pet_window(model)
     if window is None:
         return None, result
 

@@ -36,6 +36,9 @@
     label.toggle { display: inline-flex; gap: 6px; align-items: center; margin-top: 8px; }
     button { padding: 6px 10px; border: 1px solid #78dfff; border-radius: 5px;
       background: #263a47; color: white; cursor: pointer; }
+    body.pet-mode { background-color: transparent; background-image: none; }
+    body.pet-mode #panel { display: none; }
+    body.pet-mode #live2d-canvas-container { inset: 0; min-width: 0; min-height: 0; border: none; }
   </style>
   <script>window.__live2dRuntimeErrors = [];</script>
   <script src="vendor/pixi.min.js" onerror="window.__live2dRuntimeErrors.push('vendor/pixi.min.js')"></script>
@@ -214,10 +217,12 @@
     }
 
     function viewportSize() {
-      return {
-        width: Math.max(900, container.clientWidth || window.innerWidth || 900),
-        height: Math.max(700, container.clientHeight || window.innerHeight || 700)
-      };
+      const w = container.clientWidth || window.innerWidth || 900;
+      const h = container.clientHeight || window.innerHeight || 700;
+      if (petModeActive()) {
+        return {width: Math.max(100, w), height: Math.max(100, h)};
+      }
+      return {width: Math.max(900, w), height: Math.max(700, h)};
     }
 
     function ensurePixiApplication() {
@@ -254,16 +259,56 @@
     function centerModelInternal() {
       if (!app || !currentModel || !currentModelBounds) return false;
       const bounds = currentModelBounds;
-      currentModel.position.set(
-        app.renderer.width / 2 - (bounds.x + bounds.width / 2) * currentModel.scale.x,
-        app.renderer.height / 2 - (bounds.y + bounds.height / 2) * currentModel.scale.y
-      );
+      const sx = currentModel.scale.x;
+      if (petModeActive()) {
+        const scaledW = bounds.width * sx;
+        const scaledH = bounds.height * sx;
+        let cx = (app.renderer.width - scaledW) / 2 - bounds.x * sx + petOffsetX;
+        let cy;
+        switch (petAlign) {
+          case "top":
+            cy = 0 - bounds.y * sx + petOffsetY;
+            break;
+          case "center":
+            cy = (app.renderer.height - scaledH) / 2 - bounds.y * sx + petOffsetY;
+            break;
+          default:
+            cy = app.renderer.height - 12 - scaledH - bounds.y * sx + petOffsetY;
+        }
+        currentModel.position.set(cx, cy);
+      } else {
+        currentModel.position.set(
+          app.renderer.width / 2 - (bounds.x + bounds.width / 2) * currentModel.scale.x,
+          app.renderer.height / 2 - (bounds.y + bounds.height / 2) * currentModel.scale.y
+        );
+      }
       updateDebugPanel();
       return true;
     }
 
     function fitModelToViewInternal() {
       if (!app || !currentModel) return false;
+      if (petModeActive()) {
+        currentModel.scale.set(1, 1);
+        currentModel.position.set(0, 0);
+        currentModelBounds = readModelBounds();
+        if (!currentModelBounds) {
+          result(false, "invalid_model_bounds", "无法读取 pet 模型原始边界。");
+          return false;
+        }
+        const bounds = currentModelBounds;
+        const availableW = app.renderer.width * 0.82;
+        const availableH = app.renderer.height * 0.86;
+        const autoScale = Math.min(availableW / bounds.width, availableH / bounds.height);
+        const multiplier = petScale > 0 ? petScale : 0.85;
+        const scale = autoScale * multiplier;
+        if (!Number.isFinite(scale) || scale <= 0) {
+          result(false, "invalid_model_scale", "无法计算 pet 模型缩放比例。");
+          return false;
+        }
+        currentModel.scale.set(scale, scale);
+        return centerModelInternal();
+      }
       currentModelBounds = readModelBounds();
       if (!currentModelBounds) {
         result(false, "invalid_model_bounds", "模型已加载但不可见，请检查边界、缩放、位置和画布尺寸。");
@@ -873,7 +918,34 @@
           "模型已加载但不可见。Cubism 渲染器在 doDrawModel 中失败，请检查 Core／Framework 兼容性。");
       }
     });
+    function petModeActive() {
+      return document.body.classList.contains("pet-mode");
+    }
+
+    let petScale = 0;
+    let petOffsetX = 0;
+    let petOffsetY = 0;
+    let petAlign = "bottom";
+    let petBg = "transparent";
+
+    function setupMode() {
+      const params = new URLSearchParams(window.location.search);
+      const mode = params.get("mode") || "preview";
+      if (mode === "pet") {
+        document.body.classList.add("pet-mode");
+        petScale = parseFloat(params.get("petScale")) || 0;
+        petOffsetX = parseFloat(params.get("petOffsetX")) || 0;
+        petOffsetY = parseFloat(params.get("petOffsetY")) || 0;
+        petAlign = params.get("petAlign") || "bottom";
+        petBg = params.get("bg") || "transparent";
+        if (petBg && petBg !== "transparent") {
+          document.body.style.backgroundColor = petBg;
+        }
+      }
+    }
+
     async function bootstrap() {
+      setupMode();
       if (!runtimeReady()) {
         result(false, "runtime_missing", runtimeMessage);
         return;
