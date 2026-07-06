@@ -9,11 +9,10 @@ from animation.model_manager import AnimationModel, AnimationModelRegistry
 def try_create_live2d_window(
     animation_config: dict[str, Any] | None,
 ) -> tuple[object | None, dict[str, Any]]:
-    """Attempt to create a Live2DPetWindow for experimental preview.
+    """Attempt to create a validated Live2DPetWindow.
 
-    Returns (window, status_dict).  window is None when Live2D cannot be
-    started.  This is an experimental-only function; it does NOT replace
-    the main Sprite PetWindow.
+    Returns (window, status_dict). Window is None when Live2D cannot be started.
+    Production startup uses the same validation before creating its adapter window.
     """
     options = dict(animation_config or {})
     resolved, status = resolve_animation_backend(options)
@@ -51,11 +50,7 @@ def try_create_live2d_window(
 def resolve_backend_and_window(
     animation_config: dict[str, Any] | None,
 ) -> tuple[str, Live2DPreviewStatus, object | None]:
-    """Resolve the effective backend and optionally create a Live2D window.
-
-    Always returns "sprite" as the production backend.
-    Live2D window is created only for experimental preview use.
-    """
+    """Resolve the effective backend and optionally create a Live2D window."""
     options = dict(animation_config or {})
     backend, status = resolve_animation_backend(options)
     live2d_window: object | None = None
@@ -63,4 +58,5 @@ def resolve_backend_and_window(
     if backend == "live2d_web":
         live2d_window, _result = try_create_live2d_window(options)
 
-    return "sprite", status, live2d_window
+    effective = "live2d_web" if live2d_window is not None else "sprite"
+    return effective, status, live2d_window

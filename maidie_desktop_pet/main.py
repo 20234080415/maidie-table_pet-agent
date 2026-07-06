@@ -42,6 +42,7 @@ from core.tasks import TaskScheduler
 from core.vision import ScreenReader, VisionService
 from core.version import APP_NAME, APP_VERSION
 from animation.live2d_web import resolve_animation_backend
+from animation.model_manager import AnimationModelRegistry
 from input.manager import InputManager
 from memory.memory import ConversationMemory
 from ui.window import PetWindow
@@ -51,7 +52,48 @@ from utils.logger import setup_logger
 ROOT = Path(__file__).resolve().parent
 
 
-def build_application() -> tuple[QApplication, PetWindow, PetController, InputManager]:
+def _create_main_window(config: dict, controller: PetController,
+                        confirmation_broker, logger):
+    animation = dict(config.get("animation", {}))
+    requested = str(animation.get("backend", "sprite"))
+    resolved, status = resolve_animation_backend(animation)
+    if requested == "live2d_web" and resolved == "live2d_web":
+        registry = AnimationModelRegistry(
+            animation.get("live2d_models", []), animation.get("current_model_id", "")
+        )
+        model = registry.resolve_current_model()
+        try:
+            from ui.live2d_main_window import create_live2d_main_window
+            window, result = create_live2d_main_window(
+                model, controller, ROOT / "assets", config.get("window", {}),
+                confirmation_broker, config.get("fence", {}), animation,
+            )
+        except Exception as exc:
+            window, result = None, {
+                "code": "live2d_main_import_failed", "message": str(exc),
+            }
+        if window is not None:
+            logger.info("Animation backend selected: live2d_web (%s)", status.message)
+            return window, "live2d_web", status
+        logger.warning(
+            "Live2D main backend failed (%s): %s; falling back to Sprite.",
+            result.get("code", "unknown"), result.get("message", "unknown error"),
+        )
+    elif requested == "live2d_web":
+        logger.warning(
+            "Live2D backend unavailable (%s): %s; falling back to Sprite.",
+            status.code, status.message,
+        )
+    window = PetWindow(
+        controller=controller, assets_dir=ROOT / "assets",
+        options=config.get("window", {}), confirmation_broker=confirmation_broker,
+        fence_options=config.get("fence", {}),
+    )
+    logger.info("Animation backend selected: sprite")
+    return window, "sprite", status
+
+
+def build_application() -> tuple[QApplication, object, PetController, InputManager]:
     logger = setup_logger(ROOT / "logs" / "maidie.log")
     _prepare_webengine()
     app = QApplication.instance() or QApplication(sys.argv)
@@ -61,12 +103,6 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
 
     config_store = ConfigStore(ROOT / "config" / "config.json")
     config = config_store.load()
-    animation_config = config.get("animation", {})
-    runtime_animation_backend, animation_status = resolve_animation_backend(
-        animation_config
-    )
-    if runtime_animation_backend != animation_config.get("backend", "sprite"):
-        logger.warning("Live2D backend unavailable: %s", animation_status.message)
     chat_client, codex_client = OpenAICompatibleClient.clients_from_config(
         ROOT / "config" / "config.json"
     )
@@ -126,12 +162,8 @@ def build_application() -> tuple[QApplication, PetWindow, PetController, InputMa
     )
     controller.cursor_chase = cursor_chase
     controller.register_plugin(network_plugin)
-    window = PetWindow(
-        controller=controller,
-        assets_dir=ROOT / "assets",
-        options=config.get("window", {}),
-        confirmation_broker=confirmation_broker,
-        fence_options=config.get("fence", {}),
+    window, _runtime_backend, _animation_status = _create_main_window(
+        config, controller, confirmation_broker, logger
     )
     input_manager = InputManager(window.global_rect)
     input_manager.cursor_moved.connect(controller.on_cursor_moved)

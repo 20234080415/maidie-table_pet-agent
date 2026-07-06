@@ -98,7 +98,7 @@ class BackendSwitchTests(unittest.TestCase):
                 "current_model_id": self.model.id,
                 "live2d_models": [self.model.to_dict()],
             })
-            self.assertEqual(backend, "sprite")
+            self.assertEqual(backend, "live2d_web")
             self.assertIs(window, mock_window)
 
     def test_resolve_backend_falls_back_to_sprite_on_live2d_failure(self):

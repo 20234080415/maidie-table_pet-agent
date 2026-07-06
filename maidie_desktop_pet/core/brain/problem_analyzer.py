@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 
-@dataclass(slots=True)
+@dataclass
 class ProblemContext:
     problem_type: str = "unknown"
     visible_text: str = ""

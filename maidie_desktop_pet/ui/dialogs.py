@@ -327,7 +327,7 @@ class SettingsDialog(QDialog):
         layout = QFormLayout(page)
         self.animation_backend = QComboBox()
         self.animation_backend.addItem("Sprite（默认）", "sprite")
-        self.animation_backend.addItem("Live2D Web（实验性）", "live2d_web")
+        self.animation_backend.addItem("Live2D Web（重启后启用）", "live2d_web")
         backend_index = self.animation_backend.findData(
             self.settings.get("animation_backend", "sprite")
         )
@@ -408,9 +408,10 @@ class SettingsDialog(QDialog):
         pet_layout.addWidget(pet_close_btn)
 
         note = QLabel(
-            "Live2D Web 当前为实验预览，不会替换 Sprite 主桌宠。"
-            "可使用浏览器预览或打开实验窗口验证模型效果。"
-            "缺少 PyQt6-WebEngine、Live2D Web Runtime 或模型失效时会明确报错。"
+            "选择后请保存并重启 Maidie，Live2D Web 才会成为主桌宠后端；"
+            "当前不支持运行时无缝热切换。可先用预览窗口验证模型。"
+            "缺少 PyQt6-WebEngine、Viewer、Live2D Web Runtime 或模型失效时，"
+            "下次启动会记录原因并自动回退 Sprite。"
         )
         note.setWordWrap(True)
         layout.addRow("当前后端", self.animation_backend)

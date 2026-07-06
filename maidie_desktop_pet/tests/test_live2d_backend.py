@@ -52,6 +52,19 @@ class Live2DBackendTests(unittest.TestCase):
         self.assertEqual(result["args"], ["idle"])
         self.assertIn("Unsupported semantic state", result["error"])
 
+    def test_application_states_map_to_live2d_states(self):
+        expected = {
+            "idle": "idle", "talking": "speaking", "streaming": "speaking",
+            "thinking": "thinking", "headpat": "headpat", "dragged": "dragged",
+            "success": "success", "error": "error", "confused": "confused",
+            "sleepy": "sleepy",
+        }
+        for source, target in expected.items():
+            with self.subTest(source=source):
+                result = self.backend.apply_state(source)
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["args"], [target])
+
     def test_queue_can_be_drained_and_shutdown_is_explicit(self):
         self.backend.play_motion("Idle")
         self.backend.enable_mouse_follow(True)

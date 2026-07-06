@@ -6,7 +6,7 @@ Maidie 是一个使用 Python 与 PyQt6 构建的 Windows 桌面 AI 桌宠，也
 
 - **桌宠 UI**：透明置顶窗口、拖拽缩放、右键菜单、围栏、帮助与设置页面。
 - **动画与行为**：待机、行走、说话、思考、睡眠及数据驱动的摸头、戳脸、庆祝等动作；主动行为默认关闭。
-- **Live2D（实验性）**：可扫描仓库外的 `*.model3.json`、管理和选择多个模型；第一阶段只提供设置与信息预览，默认及失败回退仍为 Sprite。
+- **Live2D Web 主后端（基础版）**：可扫描仓库外的 `*.model3.json`、选择模型，并在保存配置、重启后作为主桌宠启动；Sprite 仍为默认值，模型、WebEngine、Viewer 或 Runtime 不可用时自动回退 Sprite。运行时无缝热切换尚未实现。
 - **聊天展示**：流式聊天气泡；长文本、搜索结果和 Coding Agent 分析可进入独立长内容面板。
 - **Agent Pipeline**：生产链路为 `BrainRouter → BrainPlanner → BrainExecutor → ToolRegistry → Synthesizer`，并保留规则降级。
 - **工具**：时间与倒计时、天气、Tavily 搜索、SQLite 记忆、屏幕理解、本地 OCR，以及受白名单和确认机制约束的文件、窗口与剪贴板操作。

@@ -132,6 +132,12 @@ Qwen VL 只提取屏幕摘要、可见文字、任务类型、重要区域和置
 - 新 Agent 功能放在 `core/brain`、`core/tools`、`core/prompts` 等生产目录。
 - `ai/router.py` 与 `core/agent/*` 主要用于兼容和旧测试，不承载新生产功能。
 
+## Live2D 主后端启动
+
+启动时 `main._create_main_window()` 读取 `animation.backend`。Sprite 直接创建既有 `PetWindow`；有效的 `live2d_web` 配置创建 `Live2DMainWindow(PetWindow)`，复用生产窗口接口并将角色区域替换为连接本地 Viewer 的 Live2D 视图。任何能力检查或窗口创建失败都会写入明确日志并创建 Sprite 窗口，不修改持久配置。切换只在重启后发生。
+
+`Live2DBackend` 将 talking/streaming、thinking、headpat、dragged、success、error/confused、sleepy 等应用状态规范化为 Viewer 语义状态。关闭主窗口时先关闭 Live2D 视图及其 backend/server，再执行原有 PetWindow、InputManager 与 PetController 清理链。
+
 ## 当前限制
 
 - 搜索目前只实现 Tavily provider。

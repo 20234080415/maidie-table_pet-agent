@@ -45,6 +45,17 @@ class Live2DBackend:
         "idle", "speaking", "thinking", "confused", "success", "error",
         "sleepy", "dragged", "headpat",
     })
+    STATE_ALIASES = {
+        "idle": "idle",
+        "talking": "speaking", "streaming": "speaking", "speaking": "speaking",
+        "thinking": "thinking", "review": "thinking",
+        "headpat": "headpat",
+        "drag": "dragged", "dragged": "dragged",
+        "success": "success", "happy": "success", "celebrate": "success",
+        "error": "error", "failed": "error",
+        "confused": "confused",
+        "sleep": "sleepy", "sleepy": "sleepy",
+    }
 
     LOCAL_QUEUE_MAXLEN = 500
 
@@ -105,7 +116,8 @@ class Live2DBackend:
         return self._enqueue("loadModel", source)
 
     def apply_state(self, state: str, intensity: float | None = None) -> dict[str, Any]:
-        normalized = str(state or "").strip().lower()
+        requested = str(state or "").strip().lower()
+        normalized = self.STATE_ALIASES.get(requested, requested)
         args: tuple[Any, ...] = (normalized,)
         if intensity is not None:
             try:

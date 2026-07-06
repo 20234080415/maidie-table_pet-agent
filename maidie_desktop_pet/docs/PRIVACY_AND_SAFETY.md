@@ -89,6 +89,13 @@ Maidie 因此不是通用命令执行器，也不会接受 Planner 伪造的 `co
 
 本机 coding CLI 仍可能把工作区代码发送给它所配置的模型服务。启用前应检查该 CLI 的账号、provider 与隐私政策，不要把含密钥或私人数据的目录设为工作区。
 
+## Live2D Web
+
+- 模型文件来自用户选择的本地目录，不复制进仓库，也不由 Maidie 上传。
+- Viewer 由仅供本机窗口使用的本地预览服务提供；模型与 Runtime 许可仍由用户负责。
+- 配置为 Live2D 但依赖或模型不可用时只记录失败原因并回退 Sprite，不会联网下载模型或 Runtime。
+- WebEngine 仍是浏览器运行环境；应只使用可信的本地 Viewer、Runtime 和模型文件。
+
 ## API Key
 
 - 设置界面使用密码输入框，但 `config/config.json` 中仍是本地明文。

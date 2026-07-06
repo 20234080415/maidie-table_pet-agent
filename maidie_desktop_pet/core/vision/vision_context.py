@@ -10,7 +10,7 @@ VALID_TASK_TYPES = {
 }
 
 
-@dataclass(slots=True)
+@dataclass
 class VisionContext:
     screen_summary: str = ""
     visible_text: str = ""
