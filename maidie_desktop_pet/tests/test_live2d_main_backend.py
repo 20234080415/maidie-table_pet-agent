@@ -137,7 +137,9 @@ class MainWindowMenuTests(unittest.TestCase):
         pet_source = inspect.getsource(live2d_pet_window.Live2DPetWindow.__init__)
         self.assertIn("420", main_source)
         self.assertIn("680", main_source)
+        self.assertIn("setMinimumSize(36, 52)", main_source)
         self.assertIn("420, 680", pet_source)
+        self.assertIn("setMinimumSize(36, 52)", pet_source)
 
 
 class MainWindowCleanupTests(unittest.TestCase):

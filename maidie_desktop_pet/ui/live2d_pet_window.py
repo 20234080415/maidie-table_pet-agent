@@ -144,10 +144,10 @@ class Live2DPetWindow(QWidget):
         )
         self.resize(420, 680) if self._is_pet else self.resize(700, 760)
         if self._is_pet:
-            self.setMinimumSize(240, 360)
+            self.setMinimumSize(36, 52)
 
         self._webview = QWebEngineView(self)
-        self._webview.setMinimumSize(200, 260) if self._is_pet else self._webview.setMinimumSize(300, 300)
+        self._webview.setMinimumSize(1, 1) if self._is_pet else self._webview.setMinimumSize(300, 300)
         self._configure_webengine_background()
 
         layout = QVBoxLayout(self)
@@ -347,7 +347,7 @@ class Live2DPetWindow(QWidget):
             self._fit_timer.start()
             event.accept()
             return
-        self._scale = max(0.3, min(2.5, self._scale * factor))
+        self._scale = max(0.08, min(2.5, self._scale * factor))
         base_w, base_h = (420, 680) if self._is_pet else (700, 760)
         new_w = int(base_w * self._scale)
         new_h = int(base_h * self._scale)

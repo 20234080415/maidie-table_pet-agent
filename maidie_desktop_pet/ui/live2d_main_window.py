@@ -25,7 +25,7 @@ class Live2DMainWindow(PetWindow):
         self.layout().replaceWidget(self.character, self.live2d_view)
         self.character.hide()
         self.live2d_view.show()
-        self.setMinimumSize(max(self.minimumWidth(), 280), max(self.minimumHeight(), 420))
+        self.setMinimumSize(36, 52)
         self.resize(max(self.width(), 420), max(self.height(), 680))
         controller.animation_changed.connect(self.apply_live2d_state)
         controller.state_changed.connect(self.apply_live2d_state)
