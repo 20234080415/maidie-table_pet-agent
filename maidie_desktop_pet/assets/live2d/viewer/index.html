@@ -135,6 +135,10 @@
     let semanticRunId = 0;
     let debugFitEnabled = false;
     let lastFitDiagnostics = null;
+    let renderResolution = 1;
+    const PET_MIN_RENDER_WIDTH = 360;
+    const PET_MIN_RENDER_HEIGHT = 520;
+    const MAX_RENDER_RESOLUTION = 12;
     let modelCapabilities = {motions: [], expressions: [], parameters: []};
     const initialParameters = new Map();
     const parameterOverrides = new Map();
@@ -251,13 +255,26 @@
       const w = Math.floor(rect.width || container.clientWidth || window.innerWidth || 900);
       const h = Math.floor(rect.height || container.clientHeight || window.innerHeight || 700);
       if (petModeActive()) {
-        return {width: Math.max(100, w), height: Math.max(100, h)};
+        return {width: Math.max(1, w), height: Math.max(1, h)};
       }
       return {width: Math.max(900, w), height: Math.max(700, h)};
     }
 
+    function desiredRenderResolution(size) {
+      const deviceResolution = Math.max(1, Number(window.devicePixelRatio) || 1);
+      if (!petModeActive()) return deviceResolution;
+      // Keep a useful backing-buffer resolution even when the pet is shrunk to
+      // fingernail size. Layout and fit calculations still use logical pixels.
+      return Math.min(MAX_RENDER_RESOLUTION, Math.max(
+        deviceResolution,
+        PET_MIN_RENDER_WIDTH / Math.max(1, size.width),
+        PET_MIN_RENDER_HEIGHT / Math.max(1, size.height)
+      ));
+    }
+
     function ensurePixiApplication() {
       const size = viewportSize();
+      renderResolution = desiredRenderResolution(size);
       if (!app) {
         // pixi-live2d-display 0.4.0's Cubism 4 masking renderer is a WebGL 1
         // implementation; WebGL 2 can leak the mask framebuffer onto the canvas.
@@ -265,12 +282,14 @@
           PIXI.settings.PREFER_ENV = PIXI.ENV.WEBGL_LEGACY;
         }
         app = new PIXI.Application({width: size.width, height: size.height,
-          backgroundAlpha: 0, antialias: true, autoStart: true});
+          backgroundAlpha: 0, antialias: true, autoStart: true,
+          autoDensity: true, resolution: renderResolution});
         const canvas = app.view || app.canvas;
         if (!canvas) throw new Error("Pixi 应用未能创建画布。");
         container.replaceChildren(canvas);
         window.__maidiePixiApplication = app;
       }
+      app.renderer.resolution = renderResolution;
       app.renderer.resize(size.width, size.height);
       const canvas = app.view || app.canvas;
       if (canvas) {
@@ -609,6 +628,8 @@
       return Object.assign({}, previewState, {
         pixiInitialized: Boolean(app),
         canvasSize: app ? {width: app.renderer.width, height: app.renderer.height} : {width: 0, height: 0},
+        renderResolution,
+        backingSize: canvas ? {width: canvas.width, height: canvas.height} : {width: 0, height: 0},
         stageChildrenCount: app ? app.stage.children.length : 0,
         modelBounds: currentModelBounds,
         modelLoaded: Boolean(window.__maidieLive2DModel),
