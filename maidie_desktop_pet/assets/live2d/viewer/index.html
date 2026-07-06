@@ -216,6 +216,33 @@
       }
     }
 
+    function cubismCoreCompatibility(core) {
+      if (!core || core.major <= 4) return {supported: true, experimental: false};
+      if (core.major <= 6) return {supported: true, experimental: true};
+      return {supported: false, experimental: false};
+    }
+
+    function installCubismCoreCompatibility(core) {
+      if (!core || core.major <= 4 || core.major > 6) return;
+      const Model = window.Live2DCubismCore && window.Live2DCubismCore.Model;
+      if (!Model || Model.__maidieCompatibilityInstalled) return;
+      const originalFromMoc = Model.fromMoc;
+      Model.fromMoc = function(moc) {
+        const model = originalFromMoc.call(this, moc);
+        if (model && model.drawables && !model.drawables.renderOrders) {
+          // Core 6 keeps the final renderer order on Model because it now also
+          // orders offscreen buffers. The legacy Pixi framework still expects
+          // the drawable portion on drawables.renderOrders.
+          const orders = typeof model.getRenderOrders === "function"
+            ? model.getRenderOrders() : model.renderOrders;
+          model.drawables.renderOrders = orders && orders.subarray
+            ? orders.subarray(0, model.drawables.count) : orders;
+        }
+        return model;
+      };
+      Model.__maidieCompatibilityInstalled = true;
+    }
+
     function viewportSize() {
       const w = container.clientWidth || window.innerWidth || 900;
       const h = container.clientHeight || window.innerHeight || 700;
@@ -338,6 +365,7 @@
       const canvas = app && (app.view || app.canvas);
       const bounds = currentModelBounds;
       const core = cubismCoreVersion();
+      const compatibility = cubismCoreCompatibility(core);
       const lines = [
         "Pixi 已初始化：" + (app ? "是" : "否"),
         "画布尺寸：" + (canvas ? canvas.width + " x " + canvas.height : "0 x 0"),
@@ -350,6 +378,7 @@
         "Ticker 运行中：" + (app && app.ticker ? (app.ticker.started ? "是" : "否") : "否"),
         "Ticker 帧率：" + (app && app.ticker && Number.isFinite(app.ticker.FPS) ? app.ticker.FPS.toFixed(1) : "0")
         ,"Cubism Core 版本：" + (core ? core.major + "." + core.minor + "." + core.patch : "未知")
+        ,"运行时兼容模式：" + (compatibility.experimental ? "Core 5/6 实验兼容" : "标准")
       ];
       debugNode.textContent = lines.join("\n");
     }
@@ -463,10 +492,16 @@
           networkFailureMessage("Live2D 模型预检失败。", lastNetworkFailure));
         ensurePixiApplication();
         const core = cubismCoreVersion();
-        if (core && core.major > 4) {
+        const compatibility = cubismCoreCompatibility(core);
+        if (!compatibility.supported) {
           return result(false, "runtime_incompatible",
             "Cubism Core " + core.major + "." + core.minor + "." + core.patch +
-            " 与 pixi-live2d-display 0.4.0 不兼容，请安装有合法许可的 Cubism 4.2 Core 运行库。");
+            " 超出当前兼容范围，请使用 Cubism Core 4–6 或升级 Live2D Framework。");
+        }
+        if (compatibility.experimental) {
+          installCubismCoreCompatibility(core);
+          console.warn("Maidie: using experimental Cubism Core " + core.major +
+            " compatibility with pixi-live2d-display 0.4.0");
         }
         if (currentModel) {
           app.stage.removeChild(currentModel);

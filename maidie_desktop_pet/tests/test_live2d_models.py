@@ -120,8 +120,15 @@ class AnimationModelRegistryTests(unittest.TestCase):
         self.assertIn("return await loadModelAsync", html)
         self.assertIn("DOMContentLoaded", html)
         self.assertNotIn("version.major <= 4", html)
-        self.assertIn("core.major > 4", html)
-        self.assertIn("合法许可的 Cubism 4.2 Core", html)
+        self.assertIn("function cubismCoreCompatibility(core)", html)
+        self.assertIn("function installCubismCoreCompatibility(core)", html)
+        self.assertIn("const originalFromMoc = Model.fromMoc", html)
+        self.assertIn("model.getRenderOrders()", html)
+        self.assertIn("orders.subarray(0, model.drawables.count)", html)
+        self.assertNotIn("return this.drawOrders", html)
+        self.assertIn("core.major <= 6", html)
+        self.assertIn("compatibility.experimental", html)
+        self.assertNotIn("core.major > 4", html)
         self.assertIn("PIXI.ENV.WEBGL_LEGACY", html)
         for label in ("播放随机动作", "切换开心表情",
                       "开始嘴型测试", "启用鼠标跟随"):
