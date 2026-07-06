@@ -25,6 +25,8 @@ class Live2DMainWindow(PetWindow):
         self.layout().replaceWidget(self.character, self.live2d_view)
         self.character.hide()
         self.live2d_view.show()
+        self.setMinimumSize(max(self.minimumWidth(), 280), max(self.minimumHeight(), 420))
+        self.resize(max(self.width(), 420), max(self.height(), 680))
         controller.animation_changed.connect(self.apply_live2d_state)
         controller.state_changed.connect(self.apply_live2d_state)
         controller.emotion_changed.connect(self.apply_live2d_state)
@@ -57,7 +59,7 @@ class Live2DMainWindow(PetWindow):
             "animation_live2d_pet_offset_x": 0.0,
             "animation_live2d_pet_offset_y": 0.0,
             "animation_live2d_pet_align": "bottom",
-            "animation_live2d_fit_padding": 0.88,
+            "animation_live2d_fit_padding": 0.80,
         }
         try:
             self.controller.apply_settings(values)
@@ -94,7 +96,8 @@ def create_live2d_main_window(
         pet_offset_x=float(options.get("live2d_pet_offset_x", 0.0) or 0.0),
         pet_offset_y=float(options.get("live2d_pet_offset_y", 0.0) or 0.0),
         pet_align=str(options.get("live2d_pet_align", "bottom") or "bottom"),
-        fit_padding=float(options.get("live2d_fit_padding", 0.88) or 0.88),
+        fit_padding=float(options.get("live2d_fit_padding", 0.80) or 0.80),
+        debug_fit=bool(options.get("live2d_debug_fit", False)),
         pet_bg=str(options.get("pet_bg", "transparent") or "transparent"),
     )
     if view is None:

@@ -36,7 +36,8 @@ def create_live2d_pet_window(
     pet_offset_y: float = 0.0,
     pet_align: str = "bottom",
     pet_bg: str = "transparent",
-    fit_padding: float = 0.88,
+    fit_padding: float = 0.80,
+    debug_fit: bool = False,
 ) -> tuple[QWidget | None, dict[str, Any]]:
     if model is None:
         return None, {
@@ -68,7 +69,8 @@ def create_live2d_pet_window(
                                  pet_offset_y=pet_offset_y,
                                  pet_align=pet_align,
                                  pet_bg=pet_bg,
-                                 fit_padding=fit_padding)
+                                 fit_padding=fit_padding,
+                                 debug_fit=debug_fit)
     except Exception as exc:
         return None, {
             "ok": False, "code": "pet_window_creation_failed",
@@ -94,7 +96,8 @@ class Live2DPetWindow(QWidget):
                  pet_offset_y: float = 0.0,
                  pet_align: str = "bottom",
                  pet_bg: str = "transparent",
-                 fit_padding: float = 0.88) -> None:
+                 fit_padding: float = 0.80,
+                 debug_fit: bool = False) -> None:
         super().__init__(parent)
         try:
             from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -125,7 +128,8 @@ class Live2DPetWindow(QWidget):
         self._pet_offset_y = float(pet_offset_y) if pet_offset_y else 0.0
         self._pet_align = str(pet_align or "bottom")
         self._pet_bg = str(pet_bg or "transparent")
-        self._fit_padding = max(0.5, min(0.96, float(fit_padding or 0.88)))
+        self._fit_padding = max(0.5, min(0.90, float(fit_padding or 0.80)))
+        self._debug_fit = bool(debug_fit)
         self._embedded = False
         self._fit_timer = QTimer(self)
         self._fit_timer.setSingleShot(True)
@@ -138,7 +142,9 @@ class Live2DPetWindow(QWidget):
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
         )
-        self.resize(360, 520) if self._is_pet else self.resize(700, 760)
+        self.resize(420, 680) if self._is_pet else self.resize(700, 760)
+        if self._is_pet:
+            self.setMinimumSize(240, 360)
 
         self._webview = QWebEngineView(self)
         self._webview.setMinimumSize(200, 260) if self._is_pet else self._webview.setMinimumSize(300, 300)
@@ -217,6 +223,8 @@ class Live2DPetWindow(QWidget):
             if self._pet_bg and self._pet_bg != "transparent":
                 params.append(f"bg={self._pet_bg.replace('#', '%23')}")
             params.append(f"fitPadding={self._fit_padding}")
+            if self._debug_fit:
+                params.append("debugFit=1")
             if params:
                 url += "&" + "&".join(params)
         self._backend = Live2DBackend(
@@ -340,7 +348,7 @@ class Live2DPetWindow(QWidget):
             event.accept()
             return
         self._scale = max(0.3, min(2.5, self._scale * factor))
-        base_w, base_h = (360, 520) if self._is_pet else (700, 760)
+        base_w, base_h = (420, 680) if self._is_pet else (700, 760)
         new_w = int(base_w * self._scale)
         new_h = int(base_h * self._scale)
         self.resize(new_w, new_h)

@@ -127,7 +127,17 @@ class MainWindowMenuTests(unittest.TestCase):
         self.assertEqual(values["animation_live2d_pet_offset_x"], 0.0)
         self.assertEqual(values["animation_live2d_pet_offset_y"], 0.0)
         self.assertEqual(values["animation_live2d_pet_align"], "bottom")
+        self.assertEqual(values["animation_live2d_fit_padding"], 0.80)
         window.live2d_view.reset_display.assert_called_once_with()
+
+    def test_pet_windows_use_tall_full_body_defaults(self):
+        import inspect
+        from ui import live2d_main_window, live2d_pet_window
+        main_source = inspect.getsource(live2d_main_window.Live2DMainWindow.__init__)
+        pet_source = inspect.getsource(live2d_pet_window.Live2DPetWindow.__init__)
+        self.assertIn("420", main_source)
+        self.assertIn("680", main_source)
+        self.assertIn("420, 680", pet_source)
 
 
 class MainWindowCleanupTests(unittest.TestCase):

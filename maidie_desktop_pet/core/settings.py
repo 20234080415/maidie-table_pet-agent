@@ -58,7 +58,7 @@ ANIMATION_DEFAULTS = {
     "live2d_pet_offset_x": 0.0,
     "live2d_pet_offset_y": 0.0,
     "live2d_pet_align": "bottom",
-    "live2d_fit_padding": 0.88,
+    "live2d_fit_padding": 0.80,
 }
 
 
@@ -111,7 +111,7 @@ class ConfigStore:
             if not isinstance(animation.get("live2d_models"), list):
                 animation["live2d_models"] = []
             animation["live2d_pet_scale"] = self._bounded_float(
-                animation.get("live2d_pet_scale"), 1.0, 0.25, 1.0
+                animation.get("live2d_pet_scale"), 1.0, 0.01, 1.0
             )
             animation["live2d_pet_offset_x"] = self._bounded_float(
                 animation.get("live2d_pet_offset_x"), 0.0, -1000.0, 1000.0
@@ -122,7 +122,7 @@ class ConfigStore:
             align = str(animation.get("live2d_pet_align") or "bottom").lower()
             animation["live2d_pet_align"] = align if align in {"bottom", "center", "top"} else "bottom"
             animation["live2d_fit_padding"] = self._bounded_float(
-                animation.get("live2d_fit_padding"), 0.88, 0.5, 0.96
+                animation.get("live2d_fit_padding"), 0.80, 0.5, 0.90
             )
             return config
 
@@ -181,7 +181,7 @@ class ConfigStore:
             "animation_live2d_pet_offset_x": float(animation.get("live2d_pet_offset_x", 0.0)),
             "animation_live2d_pet_offset_y": float(animation.get("live2d_pet_offset_y", 0.0)),
             "animation_live2d_pet_align": str(animation.get("live2d_pet_align", "bottom")),
-            "animation_live2d_fit_padding": float(animation.get("live2d_fit_padding", 0.88)),
+            "animation_live2d_fit_padding": float(animation.get("live2d_fit_padding", 0.80)),
         }
 
     def update_user_settings(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -267,7 +267,7 @@ class ConfigStore:
             animation["live2d_models"] = deepcopy(models) if isinstance(models, list) else []
             animation["live2d_pet_scale"] = self._bounded_float(
                 values.get("animation_live2d_pet_scale", animation.get("live2d_pet_scale")),
-                1.0, 0.25, 1.0,
+                1.0, 0.01, 1.0,
             )
             animation["live2d_pet_offset_x"] = self._bounded_float(
                 values.get("animation_live2d_pet_offset_x", animation.get("live2d_pet_offset_x")),
@@ -283,7 +283,7 @@ class ConfigStore:
             animation["live2d_pet_align"] = align if align in {"bottom", "center", "top"} else "bottom"
             animation["live2d_fit_padding"] = self._bounded_float(
                 values.get("animation_live2d_fit_padding", animation.get("live2d_fit_padding")),
-                0.88, 0.5, 0.96,
+                0.80, 0.5, 0.90,
             )
             self._atomic_write(config)
             return deepcopy(config)

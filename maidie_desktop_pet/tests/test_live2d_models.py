@@ -112,10 +112,24 @@ class AnimationModelRegistryTests(unittest.TestCase):
         self.assertIn("function fitModelToViewInternal()", html)
         self.assertIn("function centerModelInternal()", html)
         self.assertIn("currentModel.getLocalBounds()", html)
-        self.assertIn("app.renderer.width * fitPadding", html)
-        self.assertIn("app.renderer.height * fitPadding", html)
+        self.assertIn("viewportWidth * fitPadding", html)
+        self.assertIn("viewportHeight * fitPadding", html)
         self.assertIn("fitResizeTimer = setTimeout", html)
+        self.assertIn("app.renderer.resize(size.width, size.height)", html)
+        self.assertIn('canvas.style.width = size.width + "px"', html)
         self.assertIn('case "resetView":', html)
+        self.assertIn("const centerX = bounds.x + bounds.width / 2", html)
+        self.assertIn("const bottom = bounds.y + bounds.height", html)
+        self.assertIn("const fitScaleX = viewportWidth * fitPadding / bounds.width", html)
+        self.assertIn("const fitScaleY = viewportHeight * fitPadding / bounds.height", html)
+        self.assertIn('console.info("[Maidie debugFit]"', html)
+        self.assertIn('params.get("debugFit") === "1"', html)
+        self.assertIn("renderedBottom", html)
+        self.assertIn("HTMLMediaElement.prototype.play", html)
+        self.assertIn("currentModel.volume = 0", html)
+        self.assertIn("html.pet-mode, body.pet-mode { min-width: 0; min-height: 0; }", html)
+        self.assertIn("await nextRenderFrames(2)", html)
+        self.assertIn("}, 350)", html)
         self.assertIn("currentModel.visible = true", html)
         self.assertIn("currentModel.alpha = 1", html)
         self.assertIn("app.ticker.start()", html)
@@ -391,7 +405,7 @@ class AnimationConfigTests(unittest.TestCase):
             "live2d_model_root": "", "live2d_models": [],
             "live2d_pet_scale": 1.0, "live2d_pet_offset_x": 0.0,
             "live2d_pet_offset_y": 0.0, "live2d_pet_align": "bottom",
-            "live2d_fit_padding": 0.88,
+            "live2d_fit_padding": 0.80,
         })
         self.assertEqual(self.store.public_settings()["animation_backend"], "sprite")
 

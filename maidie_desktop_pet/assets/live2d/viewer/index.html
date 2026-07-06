@@ -36,6 +36,7 @@
     label.toggle { display: inline-flex; gap: 6px; align-items: center; margin-top: 8px; }
     button { padding: 6px 10px; border: 1px solid #78dfff; border-radius: 5px;
       background: #263a47; color: white; cursor: pointer; }
+    html.pet-mode, body.pet-mode { min-width: 0; min-height: 0; }
     body.pet-mode { background-color: transparent; background-image: none; }
     body.pet-mode #panel { display: none; }
     body.pet-mode #live2d-canvas-container { inset: 0; min-width: 0; min-height: 0; border: none; }
@@ -132,6 +133,8 @@
     let mouthAnimationFrame = 0;
     let mouseFollowEnabled = false;
     let semanticRunId = 0;
+    let debugFitEnabled = false;
+    let lastFitDiagnostics = null;
     let modelCapabilities = {motions: [], expressions: [], parameters: []};
     const initialParameters = new Map();
     const parameterOverrides = new Map();
@@ -244,8 +247,9 @@
     }
 
     function viewportSize() {
-      const w = container.clientWidth || window.innerWidth || 900;
-      const h = container.clientHeight || window.innerHeight || 700;
+      const rect = container.getBoundingClientRect();
+      const w = Math.floor(rect.width || container.clientWidth || window.innerWidth || 900);
+      const h = Math.floor(rect.height || container.clientHeight || window.innerHeight || 700);
       if (petModeActive()) {
         return {width: Math.max(100, w), height: Math.max(100, h)};
       }
@@ -268,6 +272,11 @@
         window.__maidiePixiApplication = app;
       }
       app.renderer.resize(size.width, size.height);
+      const canvas = app.view || app.canvas;
+      if (canvas) {
+        canvas.style.width = size.width + "px";
+        canvas.style.height = size.height + "px";
+      }
       app.stage.visible = true;
       app.stage.alpha = 1;
       if (app.start) app.start();
@@ -289,29 +298,47 @@
       const sx = currentModel.scale.x;
       const sy = currentModel.scale.y;
       if (petModeActive()) {
+        const viewportWidth = app.renderer.screen ? app.renderer.screen.width : app.renderer.width;
+        const viewportHeight = app.renderer.screen ? app.renderer.screen.height : app.renderer.height;
         const scaledW = bounds.width * sx;
         const scaledH = bounds.height * sy;
-        const marginX = Math.max(6, app.renderer.width * (1 - fitPadding) / 2);
-        const marginY = Math.max(6, app.renderer.height * (1 - fitPadding) / 2);
-        let cx = (app.renderer.width - scaledW) / 2 - bounds.x * sx + petOffsetX;
+        const marginX = Math.max(8, viewportWidth * (1 - fitPadding) / 2);
+        const marginY = Math.max(8, viewportHeight * (1 - fitPadding) / 2);
+        const centerX = bounds.x + bounds.width / 2;
+        const bottom = bounds.y + bounds.height;
+        let cx = viewportWidth / 2 - centerX * sx + petOffsetX;
         let cy;
         switch (petAlign) {
           case "top":
             cy = marginY - bounds.y * sy + petOffsetY;
             break;
           case "center":
-            cy = (app.renderer.height - scaledH) / 2 - bounds.y * sy + petOffsetY;
+            cy = viewportHeight / 2 - (bounds.y + bounds.height / 2) * sy + petOffsetY;
             break;
           default:
-            cy = app.renderer.height - marginY - scaledH - bounds.y * sy + petOffsetY;
+            cy = viewportHeight - marginY - bottom * sy + petOffsetY;
         }
         const minX = marginX - bounds.x * sx;
-        const maxX = app.renderer.width - marginX - (bounds.x + bounds.width) * sx;
+        const maxX = viewportWidth - marginX - (bounds.x + bounds.width) * sx;
         const minY = marginY - bounds.y * sy;
-        const maxY = app.renderer.height - marginY - (bounds.y + bounds.height) * sy;
+        const maxY = viewportHeight - marginY - (bounds.y + bounds.height) * sy;
+        const originalX = cx;
+        const originalY = cy;
         cx = Math.min(Math.max(cx, Math.min(minX, maxX)), Math.max(minX, maxX));
         cy = Math.min(Math.max(cy, Math.min(minY, maxY)), Math.max(minY, maxY));
         currentModel.position.set(cx, cy);
+        const renderedLeft = cx + bounds.x * sx;
+        const renderedRight = cx + (bounds.x + bounds.width) * sx;
+        const renderedTop = cy + bounds.y * sy;
+        const renderedBottom = cy + (bounds.y + bounds.height) * sy;
+        lastFitDiagnostics = Object.assign({}, lastFitDiagnostics || {}, {
+          viewportWidth, viewportHeight,
+          bounds: {x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height},
+          finalScale: sx, modelX: cx, modelY: cy,
+          renderedLeft, renderedRight, renderedTop, renderedBottom,
+          clamped: Math.abs(cx - originalX) > 0.01 || Math.abs(cy - originalY) > 0.01
+        });
+        if (debugFitEnabled) console.info("[Maidie debugFit]", lastFitDiagnostics);
       } else {
         currentModel.position.set(
           app.renderer.width / 2 - (bounds.x + bounds.width / 2) * currentModel.scale.x,
@@ -333,15 +360,19 @@
           return false;
         }
         const bounds = currentModelBounds;
-        const availableW = app.renderer.width * fitPadding;
-        const availableH = app.renderer.height * fitPadding;
-        const autoScale = Math.min(availableW / bounds.width, availableH / bounds.height);
-        const multiplier = Math.max(0.25, Math.min(1.0, petScale || 1.0));
-        const scale = autoScale * multiplier;
+        const viewportWidth = app.renderer.screen ? app.renderer.screen.width : app.renderer.width;
+        const viewportHeight = app.renderer.screen ? app.renderer.screen.height : app.renderer.height;
+        const fitScaleX = viewportWidth * fitPadding / bounds.width;
+        const fitScaleY = viewportHeight * fitPadding / bounds.height;
+        const safeScale = Math.min(fitScaleX, fitScaleY);
+        const multiplier = Math.max(0.01, Math.min(1.0, petScale || 1.0));
+        const scale = safeScale * multiplier;
         if (!Number.isFinite(scale) || scale <= 0) {
           result(false, "invalid_model_scale", "无法计算 pet 模型缩放比例。");
           return false;
         }
+        lastFitDiagnostics = {viewportWidth, viewportHeight, fitScaleX, fitScaleY,
+          safeScale, requestedMultiplier: multiplier, finalScale: scale, clamped: false};
         currentModel.scale.set(scale, scale);
         return centerModelInternal();
       }
@@ -368,7 +399,7 @@
         petOffsetX = 0;
         petOffsetY = 0;
         petAlign = "bottom";
-        fitPadding = 0.88;
+        fitPadding = 0.80;
       }
       currentModel.rotation = 0;
       currentModel.skew.set(0, 0);
@@ -524,6 +555,7 @@
           currentModel.destroy({children: true});
         }
         currentModel = await PIXI.live2d.Live2DModel.from(modelUrl);
+        if (petModeActive()) currentModel.volume = 0;
         if (currentModel.internalModel && typeof currentModel.internalModel.on === "function") {
           currentModel.internalModel.on("beforeModelUpdate", applyParameterOverrides);
         }
@@ -538,6 +570,10 @@
         collectCapabilities();
         syncParameterSliders();
         await nextRenderFrames(2);
+        // Bounds can settle only after Cubism/Pixi complete their first updates.
+        fitModelToViewInternal();
+        setTimeout(() => { if (currentModel) fitModelToViewInternal(); }, 120);
+        setTimeout(() => { if (currentModel) fitModelToViewInternal(); }, 350);
         if (!visibleVerdict()) {
           throw new Error(renderFailure || "模型未通过可见性渲染检查。");
         }
@@ -579,7 +615,9 @@
         tickerRunning: Boolean(app && app.ticker && app.ticker.started),
         runtimeFilesLoaded: window.__live2dRuntimeErrors.length === 0,
         missingRuntimeFiles: window.__live2dRuntimeErrors.slice(),
-        lastNetworkFailure
+        lastNetworkFailure,
+        fitDiagnostics: lastFitDiagnostics,
+        debugFitEnabled
       });
     };
 
@@ -978,20 +1016,31 @@
     let petOffsetY = 0;
     let petAlign = "bottom";
     let petBg = "transparent";
-    let fitPadding = 0.88;
+    let fitPadding = 0.80;
 
     function setupMode() {
       const params = new URLSearchParams(window.location.search);
       const mode = params.get("mode") || "preview";
       if (mode === "pet") {
+        document.documentElement.classList.add("pet-mode");
         document.body.classList.add("pet-mode");
         petScale = parseFloat(params.get("petScale")) || 1.0;
         petOffsetX = parseFloat(params.get("petOffsetX")) || 0;
         petOffsetY = parseFloat(params.get("petOffsetY")) || 0;
         petAlign = params.get("petAlign") || "bottom";
         petBg = params.get("bg") || "transparent";
-        fitPadding = Math.max(0.5, Math.min(0.96,
-          parseFloat(params.get("fitPadding")) || 0.88));
+        fitPadding = Math.max(0.5, Math.min(0.90,
+          parseFloat(params.get("fitPadding")) || 0.80));
+        debugFitEnabled = params.get("debugFit") === "1";
+        // Embedded pet mode is intentionally silent. Motion playback continues,
+        // but QWebEngine autoplay restrictions never receive an audio play request.
+        if (window.HTMLMediaElement && !window.__maidieMotionAudioMuted) {
+          window.__maidieMotionAudioMuted = true;
+          HTMLMediaElement.prototype.play = function() {
+            this.muted = true;
+            return Promise.resolve();
+          };
+        }
         if (petBg && petBg !== "transparent") {
           document.body.style.backgroundColor = petBg;
         }
