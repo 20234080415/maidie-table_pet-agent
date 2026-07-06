@@ -26,6 +26,18 @@ def _prepare_webengine() -> None:
 def webengine_ready() -> bool:
     return _webengine_ready
 
+
+def force_sprite_requested(argv: list[str] | None = None) -> bool:
+    return "--force-sprite" in (sys.argv[1:] if argv is None else argv)
+
+
+def apply_safe_backend_override(config: dict, force_sprite: bool) -> dict:
+    if not force_sprite:
+        return config
+    overridden = dict(config)
+    overridden["animation"] = dict(config.get("animation", {}), backend="sprite")
+    return overridden
+
 from ai.client import OpenAICompatibleClient
 from core.brain import BrainRouter, Synthesizer
 from core.pet import PetController
@@ -95,7 +107,9 @@ def _create_main_window(config: dict, controller: PetController,
 
 def build_application() -> tuple[QApplication, object, PetController, InputManager]:
     logger = setup_logger(ROOT / "logs" / "maidie.log")
-    _prepare_webengine()
+    force_sprite = force_sprite_requested()
+    if not force_sprite:
+        _prepare_webengine()
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
@@ -103,6 +117,9 @@ def build_application() -> tuple[QApplication, object, PetController, InputManag
 
     config_store = ConfigStore(ROOT / "config" / "config.json")
     config = config_store.load()
+    if force_sprite:
+        config = apply_safe_backend_override(config, True)
+        logger.warning("Safe startup requested with --force-sprite; Live2D config ignored.")
     chat_client, codex_client = OpenAICompatibleClient.clients_from_config(
         ROOT / "config" / "config.json"
     )

@@ -5,8 +5,8 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QPoint, Qt, QUrl
-from PyQt6.QtGui import QAction, QKeyEvent, QMouseEvent, QWheelEvent
+from PyQt6.QtCore import QPoint, Qt, QTimer, QUrl
+from PyQt6.QtGui import QAction, QKeyEvent, QMouseEvent, QResizeEvent, QWheelEvent
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QMenu,
@@ -36,6 +36,7 @@ def create_live2d_pet_window(
     pet_offset_y: float = 0.0,
     pet_align: str = "bottom",
     pet_bg: str = "transparent",
+    fit_padding: float = 0.88,
 ) -> tuple[QWidget | None, dict[str, Any]]:
     if model is None:
         return None, {
@@ -66,7 +67,8 @@ def create_live2d_pet_window(
                                  pet_offset_x=pet_offset_x,
                                  pet_offset_y=pet_offset_y,
                                  pet_align=pet_align,
-                                 pet_bg=pet_bg)
+                                 pet_bg=pet_bg,
+                                 fit_padding=fit_padding)
     except Exception as exc:
         return None, {
             "ok": False, "code": "pet_window_creation_failed",
@@ -91,7 +93,8 @@ class Live2DPetWindow(QWidget):
                  pet_offset_x: float = 0.0,
                  pet_offset_y: float = 0.0,
                  pet_align: str = "bottom",
-                 pet_bg: str = "transparent") -> None:
+                 pet_bg: str = "transparent",
+                 fit_padding: float = 0.88) -> None:
         super().__init__(parent)
         try:
             from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -122,6 +125,12 @@ class Live2DPetWindow(QWidget):
         self._pet_offset_y = float(pet_offset_y) if pet_offset_y else 0.0
         self._pet_align = str(pet_align or "bottom")
         self._pet_bg = str(pet_bg or "transparent")
+        self._fit_padding = max(0.5, min(0.96, float(fit_padding or 0.88)))
+        self._embedded = False
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.setInterval(120)
+        self._fit_timer.timeout.connect(self.fit_to_view)
 
         title = "Live2D 桌宠" if self._is_pet else f"Live2D 实验预览 - {model.name}"
         self.setWindowTitle(f"Maidie {title}")
@@ -207,6 +216,7 @@ class Live2DPetWindow(QWidget):
                 params.append(f"petAlign={self._pet_align}")
             if self._pet_bg and self._pet_bg != "transparent":
                 params.append(f"bg={self._pet_bg.replace('#', '%23')}")
+            params.append(f"fitPadding={self._fit_padding}")
             if params:
                 url += "&" + "&".join(params)
         self._backend = Live2DBackend(
@@ -225,6 +235,28 @@ class Live2DPetWindow(QWidget):
 
     def current_server(self) -> Live2DPreviewServer | None:
         return self._server
+
+    def set_embedded(self, embedded: bool) -> None:
+        self._embedded = bool(embedded)
+        if self._embedded:
+            self._webview.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            self._webview.customContextMenuRequested.connect(self._show_embedded_context_menu)
+
+    def _show_embedded_context_menu(self, position: QPoint) -> None:
+        parent = self.parentWidget()
+        if parent is None or not hasattr(parent, "_build_context_menu"):
+            return
+        parent._build_context_menu().exec(self._webview.mapToGlobal(position))
+
+    def fit_to_view(self) -> None:
+        self._webview.page().runJavaScript(
+            "window.fitModelToView ? window.fitModelToView() : null"
+        )
+
+    def reset_display(self) -> dict[str, Any]:
+        if self._backend is None:
+            return {"ok": False, "code": "no_backend", "message": "后端未初始化。"}
+        return self._backend.reset_view()
 
     def set_callbacks(
         self,
@@ -300,6 +332,13 @@ class Live2DPetWindow(QWidget):
             return
         delta = event.angleDelta().y()
         factor = 1.05 if delta > 0 else 0.95
+        if self._embedded:
+            parent = self.parentWidget()
+            if parent is not None and hasattr(parent, "scale_window"):
+                parent.scale_window(factor)
+            self._fit_timer.start()
+            event.accept()
+            return
         self._scale = max(0.3, min(2.5, self._scale * factor))
         base_w, base_h = (360, 520) if self._is_pet else (700, 760)
         new_w = int(base_w * self._scale)
@@ -307,7 +346,12 @@ class Live2DPetWindow(QWidget):
         self.resize(new_w, new_h)
         super().wheelEvent(event)
 
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._fit_timer.start()
+
     def closeEvent(self, event) -> None:
+        self._fit_timer.stop()
         if self._backend is not None:
             self._backend.shutdown()
             self._backend = None

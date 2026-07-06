@@ -111,6 +111,11 @@ class AnimationModelRegistryTests(unittest.TestCase):
         self.assertIn("app.stage.addChild(currentModel)", html)
         self.assertIn("function fitModelToViewInternal()", html)
         self.assertIn("function centerModelInternal()", html)
+        self.assertIn("currentModel.getLocalBounds()", html)
+        self.assertIn("app.renderer.width * fitPadding", html)
+        self.assertIn("app.renderer.height * fitPadding", html)
+        self.assertIn("fitResizeTimer = setTimeout", html)
+        self.assertIn('case "resetView":', html)
         self.assertIn("currentModel.visible = true", html)
         self.assertIn("currentModel.alpha = 1", html)
         self.assertIn("app.ticker.start()", html)
@@ -384,6 +389,9 @@ class AnimationConfigTests(unittest.TestCase):
         self.assertEqual(animation, {
             "backend": "sprite", "current_model_id": "",
             "live2d_model_root": "", "live2d_models": [],
+            "live2d_pet_scale": 1.0, "live2d_pet_offset_x": 0.0,
+            "live2d_pet_offset_y": 0.0, "live2d_pet_align": "bottom",
+            "live2d_fit_padding": 0.88,
         })
         self.assertEqual(self.store.public_settings()["animation_backend"], "sprite")
 

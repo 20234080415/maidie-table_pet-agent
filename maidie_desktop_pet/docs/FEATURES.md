@@ -11,6 +11,8 @@
 
 Sprite / WebP 仍是默认且完整的桌宠动画后端。`live2d_web` 支持扫描外部目录中的 `*.model3.json`、注册并选择模型，也可在重启后成为主桌宠渲染后端。主窗口继续复用现有聊天、设置、输入、围栏与关机接口，基础状态会映射到 Live2D Viewer。模型、PyQt6-WebEngine、Viewer 或 Live2D Web Runtime 缺失时会记录结构化原因并自动回退 Sprite。当前不支持运行时无缝热切换。第三方资源不复制进仓库，详见 [`assets/live2d/README.md`](../assets/live2d/README.md)。
 
+Live2D 主窗口右键菜单提供设置、切回 Sprite、重置显示参数和关闭入口。Viewer 使用模型真实 bounds、统一安全 padding、水平居中与默认底部对齐；窗口 resize 和滚轮调整后会 debounce 并重新 fit。紧急情况下可用 `--force-sprite` 或 `start_maidie_sprite_safe.bat` 绕过 Live2D 配置启动。
+
 主图集负责 `idle`、行走、奔跑、思考、说话、等待、成功和失败等状态。额外动作使用 `assets/actions/` 下的数据驱动 WebP 动作条，可配置帧率、冷却和优先级。详见[动作系统](ACTIONS.md)。
 
 ## 鼠标和键盘互动

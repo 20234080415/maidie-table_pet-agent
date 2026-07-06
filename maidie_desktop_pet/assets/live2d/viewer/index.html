@@ -287,21 +287,30 @@
       if (!app || !currentModel || !currentModelBounds) return false;
       const bounds = currentModelBounds;
       const sx = currentModel.scale.x;
+      const sy = currentModel.scale.y;
       if (petModeActive()) {
         const scaledW = bounds.width * sx;
-        const scaledH = bounds.height * sx;
+        const scaledH = bounds.height * sy;
+        const marginX = Math.max(6, app.renderer.width * (1 - fitPadding) / 2);
+        const marginY = Math.max(6, app.renderer.height * (1 - fitPadding) / 2);
         let cx = (app.renderer.width - scaledW) / 2 - bounds.x * sx + petOffsetX;
         let cy;
         switch (petAlign) {
           case "top":
-            cy = 0 - bounds.y * sx + petOffsetY;
+            cy = marginY - bounds.y * sy + petOffsetY;
             break;
           case "center":
-            cy = (app.renderer.height - scaledH) / 2 - bounds.y * sx + petOffsetY;
+            cy = (app.renderer.height - scaledH) / 2 - bounds.y * sy + petOffsetY;
             break;
           default:
-            cy = app.renderer.height - 12 - scaledH - bounds.y * sx + petOffsetY;
+            cy = app.renderer.height - marginY - scaledH - bounds.y * sy + petOffsetY;
         }
+        const minX = marginX - bounds.x * sx;
+        const maxX = app.renderer.width - marginX - (bounds.x + bounds.width) * sx;
+        const minY = marginY - bounds.y * sy;
+        const maxY = app.renderer.height - marginY - (bounds.y + bounds.height) * sy;
+        cx = Math.min(Math.max(cx, Math.min(minX, maxX)), Math.max(minX, maxX));
+        cy = Math.min(Math.max(cy, Math.min(minY, maxY)), Math.max(minY, maxY));
         currentModel.position.set(cx, cy);
       } else {
         currentModel.position.set(
@@ -324,10 +333,10 @@
           return false;
         }
         const bounds = currentModelBounds;
-        const availableW = app.renderer.width * 0.82;
-        const availableH = app.renderer.height * 0.86;
+        const availableW = app.renderer.width * fitPadding;
+        const availableH = app.renderer.height * fitPadding;
         const autoScale = Math.min(availableW / bounds.width, availableH / bounds.height);
-        const multiplier = petScale > 0 ? petScale : 0.85;
+        const multiplier = Math.max(0.25, Math.min(1.0, petScale || 1.0));
         const scale = autoScale * multiplier;
         if (!Number.isFinite(scale) || scale <= 0) {
           result(false, "invalid_model_scale", "无法计算 pet 模型缩放比例。");
@@ -354,6 +363,13 @@
 
     function resetViewInternal() {
       if (!currentModel) return false;
+      if (petModeActive()) {
+        petScale = 1.0;
+        petOffsetX = 0;
+        petOffsetY = 0;
+        petAlign = "bottom";
+        fitPadding = 0.88;
+      }
       currentModel.rotation = 0;
       currentModel.skew.set(0, 0);
       currentModel.scale.set(1, 1);
@@ -962,17 +978,20 @@
     let petOffsetY = 0;
     let petAlign = "bottom";
     let petBg = "transparent";
+    let fitPadding = 0.88;
 
     function setupMode() {
       const params = new URLSearchParams(window.location.search);
       const mode = params.get("mode") || "preview";
       if (mode === "pet") {
         document.body.classList.add("pet-mode");
-        petScale = parseFloat(params.get("petScale")) || 0;
+        petScale = parseFloat(params.get("petScale")) || 1.0;
         petOffsetX = parseFloat(params.get("petOffsetX")) || 0;
         petOffsetY = parseFloat(params.get("petOffsetY")) || 0;
         petAlign = params.get("petAlign") || "bottom";
         petBg = params.get("bg") || "transparent";
+        fitPadding = Math.max(0.5, Math.min(0.96,
+          parseFloat(params.get("fitPadding")) || 0.88));
         if (petBg && petBg !== "transparent") {
           document.body.style.backgroundColor = petBg;
         }
@@ -1020,6 +1039,8 @@
             return window.setMouseFollow(args[0]);
           case "reset":
             return window.reset();
+          case "resetView":
+            return window.resetView();
           default:
             return controlResult(false, command, "unknown_command", "未知远程命令：" + command);
         }
@@ -1064,10 +1085,16 @@
     } else {
       bootstrap();
     }
+    let fitResizeTimer = null;
     window.addEventListener("resize", function() {
       if (!app) return;
       ensurePixiApplication();
-      if (currentModel) fitModelToViewInternal();
+      if (fitResizeTimer) clearTimeout(fitResizeTimer);
+      fitResizeTimer = setTimeout(function() {
+        fitResizeTimer = null;
+        ensurePixiApplication();
+        if (currentModel) fitModelToViewInternal();
+      }, 120);
     });
     setInterval(updateDebugPanel, 500);
     updateDebugPanel();

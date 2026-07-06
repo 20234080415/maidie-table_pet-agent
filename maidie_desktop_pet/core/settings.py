@@ -54,6 +54,11 @@ ANIMATION_DEFAULTS = {
     "current_model_id": "",
     "live2d_model_root": "",
     "live2d_models": [],
+    "live2d_pet_scale": 1.0,
+    "live2d_pet_offset_x": 0.0,
+    "live2d_pet_offset_y": 0.0,
+    "live2d_pet_align": "bottom",
+    "live2d_fit_padding": 0.88,
 }
 
 
@@ -105,6 +110,20 @@ class ConfigStore:
             animation["live2d_model_root"] = str(animation.get("live2d_model_root") or "")
             if not isinstance(animation.get("live2d_models"), list):
                 animation["live2d_models"] = []
+            animation["live2d_pet_scale"] = self._bounded_float(
+                animation.get("live2d_pet_scale"), 1.0, 0.25, 1.0
+            )
+            animation["live2d_pet_offset_x"] = self._bounded_float(
+                animation.get("live2d_pet_offset_x"), 0.0, -1000.0, 1000.0
+            )
+            animation["live2d_pet_offset_y"] = self._bounded_float(
+                animation.get("live2d_pet_offset_y"), 0.0, -1000.0, 1000.0
+            )
+            align = str(animation.get("live2d_pet_align") or "bottom").lower()
+            animation["live2d_pet_align"] = align if align in {"bottom", "center", "top"} else "bottom"
+            animation["live2d_fit_padding"] = self._bounded_float(
+                animation.get("live2d_fit_padding"), 0.88, 0.5, 0.96
+            )
             return config
 
     def public_settings(self) -> dict[str, Any]:
@@ -158,6 +177,11 @@ class ConfigStore:
             "animation_current_model_id": str(animation.get("current_model_id", "")),
             "animation_live2d_model_root": str(animation.get("live2d_model_root", "")),
             "animation_live2d_models": deepcopy(animation.get("live2d_models", [])),
+            "animation_live2d_pet_scale": float(animation.get("live2d_pet_scale", 1.0)),
+            "animation_live2d_pet_offset_x": float(animation.get("live2d_pet_offset_x", 0.0)),
+            "animation_live2d_pet_offset_y": float(animation.get("live2d_pet_offset_y", 0.0)),
+            "animation_live2d_pet_align": str(animation.get("live2d_pet_align", "bottom")),
+            "animation_live2d_fit_padding": float(animation.get("live2d_fit_padding", 0.88)),
         }
 
     def update_user_settings(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -241,6 +265,26 @@ class ConfigStore:
             ) or "").strip()
             models = values.get("animation_live2d_models", animation.get("live2d_models", []))
             animation["live2d_models"] = deepcopy(models) if isinstance(models, list) else []
+            animation["live2d_pet_scale"] = self._bounded_float(
+                values.get("animation_live2d_pet_scale", animation.get("live2d_pet_scale")),
+                1.0, 0.25, 1.0,
+            )
+            animation["live2d_pet_offset_x"] = self._bounded_float(
+                values.get("animation_live2d_pet_offset_x", animation.get("live2d_pet_offset_x")),
+                0.0, -1000.0, 1000.0,
+            )
+            animation["live2d_pet_offset_y"] = self._bounded_float(
+                values.get("animation_live2d_pet_offset_y", animation.get("live2d_pet_offset_y")),
+                0.0, -1000.0, 1000.0,
+            )
+            align = str(values.get(
+                "animation_live2d_pet_align", animation.get("live2d_pet_align", "bottom")
+            )).lower()
+            animation["live2d_pet_align"] = align if align in {"bottom", "center", "top"} else "bottom"
+            animation["live2d_fit_padding"] = self._bounded_float(
+                values.get("animation_live2d_fit_padding", animation.get("live2d_fit_padding")),
+                0.88, 0.5, 0.96,
+            )
             self._atomic_write(config)
             return deepcopy(config)
 
@@ -258,3 +302,11 @@ class ConfigStore:
             encoding="utf-8",
         )
         temporary.replace(self.path)
+
+    @staticmethod
+    def _bounded_float(value: Any, default: float, minimum: float, maximum: float) -> float:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, min(maximum, parsed))

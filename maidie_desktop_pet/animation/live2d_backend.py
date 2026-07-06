@@ -179,6 +179,9 @@ class Live2DBackend:
     def reset(self) -> dict[str, Any]:
         return self._enqueue("reset")
 
+    def reset_view(self) -> dict[str, Any]:
+        return self._enqueue("resetView")
+
     def shutdown(self) -> dict[str, Any]:
         if self._shutdown:
             return {
