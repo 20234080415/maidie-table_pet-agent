@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from memory.memory import ConversationMemory
 
@@ -61,6 +62,82 @@ class MemorySystemTests(unittest.TestCase):
         )
         self.memory.save("我的密码是 123456", "我不会保存它")
         self.assertEqual(self.memory.get_recent(), [])
+
+    def _seed_all_memory_types(self):
+        self.memory.save("hello", "hi")
+        self.memory.save_memory("fact", "name", "Ming", 0.8)
+        self.memory.save_memory("preference", "style", "concise", 0.9)
+
+    def test_delete_conversation_history_preserves_long_term_memory(self):
+        self._seed_all_memory_types()
+
+        self.assertTrue(self.memory.delete_conversation_history())
+
+        self.assertEqual(self.memory.get_recent(), [])
+        self.assertEqual(
+            {(item["type"], item["key"]) for item in self.memory.load_memories()},
+            {("fact", "name"), ("preference", "style")},
+        )
+
+    def test_delete_long_term_memory_preserves_conversation_history(self):
+        self._seed_all_memory_types()
+
+        self.assertTrue(self.memory.delete_long_term_memory())
+
+        self.assertEqual(len(self.memory.get_recent()), 1)
+        self.assertEqual(self.memory.load_memories(), [])
+
+    def test_delete_all_memory_persists_after_reopening_database(self):
+        self._seed_all_memory_types()
+
+        self.assertTrue(self.memory.delete_all_memory())
+        reopened = ConversationMemory(self.path)
+
+        self.assertEqual(reopened.get_recent(), [])
+        self.assertEqual(reopened.load_memories(), [])
+
+    def test_clear_remains_a_full_delete_compatibility_alias(self):
+        self._seed_all_memory_types()
+
+        self.assertTrue(self.memory.clear())
+
+        self.assertEqual(self.memory.get_recent(), [])
+        self.assertEqual(self.memory.load_memories(), [])
+
+    def test_each_scoped_delete_persists_after_reopening_database(self):
+        self._seed_all_memory_types()
+        self.assertTrue(self.memory.delete_conversation_history())
+        reopened = ConversationMemory(self.path)
+        self.assertEqual(reopened.get_recent(), [])
+        self.assertEqual(len(reopened.load_memories()), 2)
+
+        reopened.save("new", "reply")
+        self.assertTrue(reopened.delete_long_term_memory())
+        reopened_again = ConversationMemory(self.path)
+        self.assertEqual(len(reopened_again.get_recent()), 1)
+        self.assertEqual(reopened_again.load_memories(), [])
+
+    def test_stale_generation_cannot_write_extracted_memory(self):
+        generation = self.memory.generation_token()
+        self.assertTrue(self.memory.delete_conversation_history())
+
+        stored = self.memory.save_extracted({
+            "facts": [{"key": "name", "value": "old"}],
+            "preferences": [],
+        }, generation=generation)
+
+        self.assertFalse(stored)
+        self.assertEqual(self.memory.load_memories(), [])
+
+    def test_delete_failure_is_reported(self):
+        self._seed_all_memory_types()
+        with patch.object(
+            self.memory, "_connect", side_effect=sqlite3.OperationalError("locked")
+        ):
+            self.assertFalse(self.memory.delete_all_memory())
+
+        self.assertEqual(len(self.memory.get_recent()), 1)
+        self.assertEqual(len(self.memory.load_memories()), 2)
 
 
 if __name__ == "__main__":

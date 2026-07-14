@@ -41,6 +41,8 @@ class PetController(QObject):
     fence_changed = pyqtSignal(object)
     region_selection_requested = pyqtSignal(str)
     coding_agent_event = pyqtSignal(object)
+    output_event = pyqtSignal(object)
+    conversation_history_cleared = pyqtSignal()
 
     def __init__(
         self,
@@ -83,6 +85,8 @@ class PetController(QObject):
         self._user_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="maidie-user")
         self._proactive_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="maidie-proactive")
         self._memory_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="maidie-memory")
+        self._memory_futures: set[Any] = set()
+        self._memory_futures_lock = threading.Lock()
         self._executor = self._user_executor  # Compatibility alias.
         self._proactive_future: Any | None = None
         self._proactive_poll_timer = QTimer(self)
@@ -93,7 +97,7 @@ class PetController(QObject):
             self._prepare_ai_request, self._show_stream_fragment,
             self._on_ai_result, self._on_ai_response_completed,
             self.sentence_completed.emit, self,
-            thinking_feedback=self.message_delta.emit,
+            output_event=self.output_event.emit,
         )
         self.chat_streamer = self.ai_session.streamer
         self._last_tick = monotonic()
@@ -105,7 +109,6 @@ class PetController(QObject):
         self._tick_timer = QTimer(self)
         self._tick_timer.timeout.connect(self._tick)
         self._tick_timer.start(16)
-        self._wire_coding_agent()
 
     def _wire_coding_agent(self) -> None:
         executor = getattr(self.ai_router, "executor", None)
@@ -126,6 +129,10 @@ class PetController(QObject):
         tool = registry.get("coding_agent") if registry is not None else None
         if tool is not None and hasattr(tool, "cancel"):
             tool.cancel()
+
+    def cancel_current_task(self) -> None:
+        self.ai_session.invalidate_current_request()
+        self.cancel_coding_agent()
 
     @property
     def state(self) -> PetState:
@@ -200,9 +207,55 @@ class PetController(QObject):
     def register_plugin(self, plugin: Any) -> None:
         self._plugins.append(plugin)
 
-    def clear_memory(self) -> None:
-        self.memory.clear()
+    def clear_conversation_history(self) -> bool:
+        self.ai_session.invalidate_current_request()
+        self._cancel_memory_extractions()
+        success = bool(self.memory.delete_conversation_history())
+        if not success:
+            return False
+        if hasattr(self.ai_router, "clear_conversation_state"):
+            self.ai_router.clear_conversation_state()
+        self._selected_region_rect = None
+        self.conversation_history_cleared.emit()
+        self._broadcast("on_conversation_history_cleared")
+        return True
+
+    def clear_long_term_memory(self) -> bool:
+        self.ai_session.invalidate_current_request()
+        self._cancel_memory_extractions()
+        success = bool(self.memory.delete_long_term_memory())
+        if success:
+            self._broadcast("on_long_term_memory_cleared")
+        return success
+
+    def clear_all_memory(self) -> bool:
+        self.ai_session.invalidate_current_request()
+        self._cancel_memory_extractions()
+        success = bool(self.memory.delete_all_memory())
+        if not success:
+            return False
+        if hasattr(self.ai_router, "clear_conversation_state"):
+            self.ai_router.clear_conversation_state()
+        self._selected_region_rect = None
+        self.conversation_history_cleared.emit()
         self._broadcast("on_memory_cleared")
+        return True
+
+    def clear_memory(self) -> bool:
+        """Compatibility alias for the former full-memory reset."""
+        return self.clear_all_memory()
+
+    def _cancel_memory_extractions(self) -> None:
+        with self._memory_futures_lock:
+            futures = tuple(self._memory_futures)
+        for future in futures:
+            cancel = getattr(future, "cancel", None)
+            if callable(cancel):
+                cancel()
+
+    def _forget_memory_future(self, future: Any) -> None:
+        with self._memory_futures_lock:
+            self._memory_futures.discard(future)
 
     def recent_chats(self) -> list[dict[str, str]]:
         return self.memory.get_recent()
@@ -654,11 +707,21 @@ class PetController(QObject):
                 or self.memory.can_extract(message, response["text"])
             )
         ):
-            self._memory_executor.submit(
+            generation = (
+                self.memory.generation_token()
+                if hasattr(self.memory, "generation_token") else None
+            )
+            future = self._memory_executor.submit(
                 self._extract_and_store_memories,
                 message,
                 stored_response,
+                generation,
             )
+            with self._memory_futures_lock:
+                self._memory_futures.add(future)
+            add_done_callback = getattr(future, "add_done_callback", None)
+            if callable(add_done_callback):
+                add_done_callback(self._forget_memory_future)
         elif not should_extract:
             try:
                 self.logger.debug("performance memory_extraction_skipped=true request_id=%s",
@@ -678,11 +741,16 @@ class PetController(QObject):
             return False
         return True
 
-    def _extract_and_store_memories(self, message: str, response: str) -> None:
+    def _extract_and_store_memories(
+        self, message: str, response: str, generation: int | None = None
+    ) -> None:
         started = monotonic()
         try:
             extracted = self.ai_router.extract_memories(message, response)
-            self.memory.save_extracted(extracted)
+            if generation is None:
+                self.memory.save_extracted(extracted)
+            else:
+                self.memory.save_extracted(extracted, generation=generation)
         except Exception:
             self.logger.exception("Memory extraction failed")
         finally:
@@ -914,5 +982,6 @@ class PetController(QObject):
             self._proactive_future = None
         self._user_executor.shutdown(wait=False, cancel_futures=True)
         self._proactive_executor.shutdown(wait=False, cancel_futures=True)
+        self._cancel_memory_extractions()
         self._memory_executor.shutdown(wait=False, cancel_futures=True)
         self.logger.info("Maidie controller shutdown complete")

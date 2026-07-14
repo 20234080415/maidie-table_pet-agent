@@ -10,6 +10,7 @@ from core.brain.intent_classifier import IntentClassifier
 from core.brain.llm_router import LLMIntentRouter
 from core.brain.planner import BrainPlanner
 from core.brain.synthesizer import Synthesizer
+from core.session.output_events import OutputMode
 from core.performance import mark
 from core.vision.vision_session import VisionSession
 from core.vision.intent_rules import detect_vision_scope
@@ -48,6 +49,16 @@ class BrainRouter:
     def classify(self, user_input: str) -> str:
         return self.intent_router.classify(user_input)
 
+    def clear_conversation_state(self) -> None:
+        if hasattr(self.intent_router, "clear_context"):
+            self.intent_router.clear_context()
+        service = self._vision_service()
+        if service is not None and hasattr(service, "clear_session"):
+            service.clear_session()
+        self._vision_clarification_pending = False
+        self._vision_clarification_created_at = 0.0
+        self._vision_pending_default_scope = "active_window"
+
     def route(self, user_input: str, context: list[dict[str, Any]] | None = None,
               on_delta: Callable[[str], None] | None = None) -> dict[str, str]:
         context = context or []
@@ -61,7 +72,8 @@ class BrainRouter:
                 session.clear()
             self._vision_clarification_pending = False
             result = self.synthesizer.synthesize(
-                user_input, "vision_cleared", None, [], self._memory_context(), context, on_delta
+                user_input, "vision_cleared", None, [], self._memory_context(), context, on_delta,
+                output_mode=(OutputMode.CHAT_NATURAL if on_delta else None),
             )
             self._log_vision_route("vision_clear", "fast_rule", session, False,
                                    "active_window", total_started, 0.0)
@@ -139,13 +151,17 @@ class BrainRouter:
                                            "selected_rect": selected_rect})
             finally:
                 mark(plan_duration_ms=round((monotonic() - started) * 1000, 3))
-            executions = self.executor.execute(plan, user_input)
+            executions = (
+                self.executor.execute(plan, user_input, on_event=on_delta)
+                if on_delta else self.executor.execute(plan, user_input)
+            )
             source = self._source_for_intent(intent)
             started = monotonic()
             try:
                 result = self.synthesizer.synthesize(
                     user_input, source, plan, executions, self._memory_context(), context, on_delta,
                     technical=self._is_technical(source, user_input),
+                    output_mode=(OutputMode.TASK_STREAM if on_delta else None),
                 )
             finally:
                 deepseek_latency = monotonic() - started
@@ -163,7 +179,7 @@ class BrainRouter:
             if intent == "clarification":
                 result = self.synthesizer.synthesize(
                     user_input, "clarification", None, [], self._memory_context(), context,
-                    on_delta,
+                    on_delta, output_mode=(OutputMode.CHAT_NATURAL if on_delta else None),
                 )
                 self._log_vision_route("clarification",
                                        str(route.get("route_source", "fast_rule")), session,
@@ -172,6 +188,7 @@ class BrainRouter:
             result = self.synthesizer.synthesize(
                 user_input, "chat", None, [], self._memory_context(), context, on_delta,
                 technical=self._is_technical(intent, user_input),
+                output_mode=(OutputMode.CHAT_NATURAL if on_delta else None),
             )
         finally:
             mark(synthesize_duration_ms=round((monotonic() - started) * 1000, 3))

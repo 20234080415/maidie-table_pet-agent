@@ -9,6 +9,7 @@ from core.formatters import CodingAnalysisFormatter
 from core.performance import mark
 from core.personality import MaidieStyle
 from core.prompts.synthesizer import build_synthesizer_prompt
+from core.session.output_events import OutputMode
 
 
 class Synthesizer:
@@ -26,7 +27,8 @@ class Synthesizer:
     def synthesize(self, user_input: str, source: str, plan: dict[str, Any] | None,
                    tool_data: list[dict[str, Any]], memory_context: str,
                    context: list[dict[str, Any]], on_delta: Callable[[str], None] | None = None,
-                   technical: bool = False) -> dict[str, Any]:
+                   technical: bool = False,
+                   output_mode: OutputMode | None = None) -> dict[str, Any]:
         client = self.codex_client if technical else self.chat_client
         prompt = self._prompt(user_input, source, plan, tool_data, memory_context)
         display: dict[str, Any] = {}
@@ -87,9 +89,51 @@ class Synthesizer:
                 "full_text": full_text,
             })
             result["text"] = result["short_text"]
+        search_metadata = self._search_metadata(tool_data)
+        if search_metadata is not None:
+            result["sources"], result["show_sources"] = search_metadata
+        if output_mode is not None:
+            result["output_mode"] = output_mode.value
         if on_delta:
-            on_delta(result["text"])
+            if output_mode is None:
+                on_delta(result["text"])
+            else:
+                tool = next(
+                    (str(item.get("tool") or "") for item in tool_data
+                     if item.get("tool")), "",
+                )
+                on_delta({
+                    "type": "token",
+                    "mode": output_mode.value,
+                    "content": result["text"],
+                    "source": str(result.get("source") or source),
+                    "tool": tool,
+                    "phase": "streaming",
+                })
         return result
+
+    @staticmethod
+    def _search_metadata(
+        tool_data: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, str]], bool] | None:
+        search = next((item for item in tool_data if item.get("tool") == "search"), None)
+        if search is None:
+            return None
+        data = search.get("data", {})
+        raw = data.get("raw", {}) if isinstance(data, dict) else {}
+        if not isinstance(raw, dict):
+            return [], True
+        sources: list[dict[str, str]] = []
+        if search.get("ok"):
+            for source in raw.get("sources", []) or []:
+                if not isinstance(source, dict):
+                    continue
+                sources.append({
+                    "title": str(source.get("title") or ""),
+                    "url": str(source.get("url") or ""),
+                    "domain": str(source.get("domain") or ""),
+                })
+        return sources, bool(raw.get("show_sources", True))
 
     @staticmethod
     def _successful_coding_result(

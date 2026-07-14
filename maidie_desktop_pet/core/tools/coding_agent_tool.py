@@ -6,7 +6,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from core.tools.base import Tool, ToolResult
 from core.tools.coding_agent_process import CodingAgentProcessRunner
@@ -71,7 +71,8 @@ class CodingAgentTool(Tool):
         return False  # Planner selection is explicit; registry auto-match must stay conservative.
 
     def run(self, query: str, operation: str = "analyze_project",
-            target_path: str = "") -> ToolResult:
+            target_path: str = "",
+            on_event: Callable[[dict[str, Any]], None] | None = None) -> ToolResult:
         source = f"local_{str(self.options.get('provider') or 'opencode').lower()}"
         base = self._raw(operation)
         if not bool(self.options.get("enabled", False)):
@@ -104,6 +105,32 @@ class CodingAgentTool(Tool):
         timeout = max(1, min(600, int(self.options.get("timeout_seconds", 120))))
         prompt = self._prompt(query, operation, target_path)
         args, input_text, env = self._command(provider, executable, prompt)
+        def forward(name: str, payload: dict[str, Any]) -> None:
+            callback = self.callbacks.get(name)
+            if callback is not None:
+                callback(payload)
+            if on_event is None:
+                return
+            if name == "on_output_line":
+                on_event({
+                    "type": "token", "mode": "TASK_STREAM",
+                    "content": str(payload.get("line") or ""),
+                    "source": str(payload.get("stream") or source),
+                    "tool": self.name, "phase": "output",
+                })
+            elif name == "on_status_change":
+                on_event({
+                    "type": "progress", "mode": "TASK_PROGRESS", "content": "",
+                    "source": source, "tool": self.name,
+                    "phase": str(payload.get("status") or "running"),
+                })
+            elif name == "on_finish":
+                on_event({
+                    "type": "complete", "mode": "TASK_STREAM", "content": "",
+                    "source": source, "tool": self.name,
+                    "phase": str(payload.get("status") or "failed"),
+                })
+
         process_result = self.runner.run(
             args, str(root), input_text=input_text, timeout=timeout,
             # OpenCode can spend a long time reading files without emitting a
@@ -111,10 +138,10 @@ class CodingAgentTool(Tool):
             # must not be treated as a hung process.
             idle_timeout=(None if provider == "opencode" else
                           max(5, min(120, int(self.options.get("idle_timeout_seconds", 30))))),
-            env=env, on_start=self.callbacks.get("on_start"),
-            on_output_line=self.callbacks.get("on_output_line"),
-            on_status_change=self.callbacks.get("on_status_change"),
-            on_finish=self.callbacks.get("on_finish"),
+            env=env, on_start=lambda payload: forward("on_start", payload),
+            on_output_line=lambda payload: forward("on_output_line", payload),
+            on_status_change=lambda payload: forward("on_status_change", payload),
+            on_finish=lambda payload: forward("on_finish", payload),
         )
         base["process"] = process_result
         base["stderr"] = process_result.get("stderr_tail", "")

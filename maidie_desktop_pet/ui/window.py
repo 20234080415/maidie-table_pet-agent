@@ -78,7 +78,7 @@ class PetWindow(QWidget):
         self.bubble_controller = BubbleController(self.bubble, self._position_overlays, self)
         self.character = HatchPetSprite(assets_dir / "spritesheet.webp")
         self.chat_input = ChatInput(self)
-        self.coding_console = CodingAgentConsole(controller.cancel_coding_agent)
+        self.coding_console = CodingAgentConsole(controller.cancel_current_task)
         self.long_response_panel = LongResponsePanel()
         self.chat_input.submitted.connect(controller.submit_text)
         self.resize_handle = SubtleResizeHandle(self)
@@ -101,6 +101,8 @@ class PetWindow(QWidget):
         controller.fence_changed.connect(self._update_fence_overlay)
         controller.region_selection_requested.connect(self._start_region_selection)
         controller.coding_agent_event.connect(self._handle_coding_agent_event)
+        controller.output_event.connect(self._handle_output_event)
+        controller.conversation_history_cleared.connect(self._clear_conversation_display)
         self.character.set_facing_right(controller.direction.facing_right)
         self.character.set_animation("idle")
         self._move_to_bottom_right()
@@ -109,6 +111,42 @@ class PetWindow(QWidget):
 
     def _handle_coding_agent_event(self, event: dict) -> None:
         self.coding_console.handle_event(event)
+
+    def _handle_output_event(self, event: dict) -> None:
+        kind = str(event.get("type") or "")
+        mode = str(event.get("mode") or "")
+        tool = str(event.get("tool") or "")
+        phase = str(event.get("phase") or "")
+        content = str(event.get("content") or "")
+        if kind == "cancelled":
+            if tool == "coding_agent":
+                self.coding_console.handle_event({"event": "finish", "status": "cancelled"})
+            self.bubble.clear()
+            self.bubble.hide()
+            return
+        if tool == "coding_agent":
+            if kind == "token" and phase == "output":
+                self.coding_console.handle_event({
+                    "event": "output", "stream": event.get("source", "stdout"),
+                    "line": content,
+                })
+            elif kind == "progress" and phase == "running":
+                self.coding_console.handle_event({"event": "start", "status": "running"})
+            elif kind == "complete" or phase in {
+                "completed", "cancelled", "timeout", "idle_timeout", "needs_setup", "failed",
+            }:
+                self.coding_console.handle_event({
+                    "event": "finish", "status": phase or "failed",
+                })
+        if mode == "TASK_PROGRESS" and content:
+            self.bubble.show_message(content, duration_ms=30000)
+            self._position_overlays()
+        elif (mode == "TASK_STREAM" and kind == "token"
+              and not (tool == "coding_agent" and phase == "output")):
+            if getattr(self, "_task_stream_request_id", "") != event.get("request_id"):
+                self._task_stream_request_id = str(event.get("request_id") or "")
+                self.bubble_controller.begin_stream({"source": event.get("source", "tool")})
+            self.bubble_controller.append_text(content)
 
     def _start_region_selection(self, message: str) -> None:
         if self._shutting_down:
@@ -199,8 +237,11 @@ class PetWindow(QWidget):
                 str(response.get("panel_title") or "详细结果"),
                 response.get("content") if isinstance(response.get("content"), dict) else {},
                 str(response.get("panel_text") or response.get("full_text") or response.get("text", "")),
-                self.frameGeometry(),
-                self.screen().availableGeometry(),
+                anchor=self.frameGeometry(),
+                screen=self.screen().availableGeometry(),
+                sources=(response.get("sources")
+                         if isinstance(response.get("sources"), list) else []),
+                show_sources=bool(response.get("show_sources", False)),
             )
 
     def _show_local_message(self, text: str) -> None:
@@ -252,7 +293,7 @@ class PetWindow(QWidget):
         menu.addAction("放大 10%", lambda: self.scale_window(1.1))
         menu.addAction("缩小 10%", lambda: self.scale_window(0.9))
         menu.addAction("恢复默认大小", lambda: self.resize(320, 380))
-        menu.addAction("清除记忆", self.controller.clear_memory)
+        menu.addAction("清除聊天记录", self._clear_conversation_history)
         menu.addSeparator()
         if self.controller.fence.is_enabled():
             menu.addAction("解除围栏模式", self.controller.disable_fence)
@@ -265,6 +306,16 @@ class PetWindow(QWidget):
     def show_recent_chats(self) -> None:
         self._dialog = RecentChatsDialog(self.controller, self)
         self._dialog.exec()
+
+    def _clear_conversation_history(self) -> None:
+        if not self.controller.clear_conversation_history():
+            QMessageBox.warning(self, "清除失败", "聊天记录未能删除，请稍后重试。")
+
+    def _clear_conversation_display(self) -> None:
+        self.bubble.clear()
+        self.bubble.hide()
+        self.chat_input.clear()
+        self.long_response_panel.close()
 
     def show_settings(self) -> None:
         # Keep settings independent from the always-on-top pet window so it can

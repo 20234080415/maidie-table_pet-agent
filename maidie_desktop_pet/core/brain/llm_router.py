@@ -28,6 +28,10 @@ class LLMIntentRouter:
         # more precise vision intent and metadata to new callers.
         return "screen" if route["intent"] == "vision" else str(route["intent"])
 
+    def clear_context(self) -> None:
+        self.last_route = None
+        self.task_context = ShortTermTaskContext()
+
     def route(self, user_input: str, context: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         history_context = ShortTermTaskContext.from_messages(context or [])
         self.task_context.event_times.update(history_context.event_times)

@@ -26,6 +26,7 @@ class ConversationMemory:
         self.path = path
         self.limit = min(20, max(1, int(limit)))
         self._lock = RLock()
+        self._generation = 0
         self._last_search_query = ""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
@@ -36,6 +37,10 @@ class ConversationMemory:
 
     def get_last_search_query(self) -> str:
         return self._last_search_query
+
+    def generation_token(self) -> int:
+        with self._lock:
+            return self._generation
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -137,24 +142,28 @@ class ConversationMemory:
         except (sqlite3.Error, OSError, TypeError, ValueError):
             return False
 
-    def save_extracted(self, extracted: dict[str, Any]) -> None:
+    def save_extracted(self, extracted: dict[str, Any], *, generation: int | None = None) -> bool:
         if not isinstance(extracted, dict):
-            return
-        for plural, memory_type, default_importance in (
-            ("facts", "fact", 0.7),
-            ("preferences", "preference", 0.9),
-        ):
-            items = extracted.get(plural, [])
-            if not isinstance(items, list):
-                continue
-            for item in items[:20]:
-                if isinstance(item, dict):
-                    self.save_memory(
-                        memory_type,
-                        str(item.get("key", "")),
-                        str(item.get("value", "")),
-                        float(item.get("importance", default_importance)),
-                    )
+            return False
+        with self._lock:
+            if generation is not None and generation != self._generation:
+                return False
+            for plural, memory_type, default_importance in (
+                ("facts", "fact", 0.7),
+                ("preferences", "preference", 0.9),
+            ):
+                items = extracted.get(plural, [])
+                if not isinstance(items, list):
+                    continue
+                for item in items[:20]:
+                    if isinstance(item, dict):
+                        self.save_memory(
+                            memory_type,
+                            str(item.get("key", "")),
+                            str(item.get("value", "")),
+                            float(item.get("importance", default_importance)),
+                        )
+            return True
 
     def load_memories(self, limit: int = 20) -> list[dict[str, Any]]:
         try:
@@ -179,12 +188,37 @@ class ConversationMemory:
             lines.append(f"- [{label}] {item['key']}：{item['value']}")
         return "\n".join(lines)
 
-    def clear(self) -> None:
-        try:
-            with self._lock, self._connect() as connection:
-                connection.execute("DELETE FROM memories")
-        except (sqlite3.Error, OSError):
-            return
+    def delete_conversation_history(self) -> bool:
+        return self._delete("type='chat'", reset_conversation_state=True)
+
+    def delete_long_term_memory(self) -> bool:
+        return self._delete("type IN ('fact', 'preference')")
+
+    def delete_all_memory(self) -> bool:
+        return self._delete(reset_conversation_state=True)
+
+    def clear(self) -> bool:
+        """Compatibility alias for callers that expect the old full reset."""
+        return self.delete_all_memory()
+
+    def _delete(self, where: str = "", *, reset_conversation_state: bool = False) -> bool:
+        with self._lock:
+            self._generation += 1
+            if reset_conversation_state:
+                self._last_search_query = ""
+            statement = "DELETE FROM memories"
+            if where:
+                statement += f" WHERE {where}"
+            try:
+                with self._connect() as connection:
+                    connection.execute(statement)
+                return True
+            except (sqlite3.Error, OSError):
+                return False
+
+    def clear_search_context(self) -> None:
+        with self._lock:
+            self._last_search_query = ""
 
     @classmethod
     def _is_sensitive(cls, text: str) -> bool:

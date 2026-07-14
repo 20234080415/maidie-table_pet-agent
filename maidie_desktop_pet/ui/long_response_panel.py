@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from html import escape
 from typing import Any
+from urllib.parse import urlsplit
 
 from PyQt6.QtCore import QRect, Qt
 from PyQt6.QtGui import QGuiApplication
@@ -79,11 +81,17 @@ class LongResponsePanel(QDialog):
         self, title: str, content: dict[str, Any] | None = None,
         full_text: str = "", anchor: QRect | None = None,
         screen: QRect | None = None,
+        sources: list[dict[str, Any]] | None = None,
+        show_sources: bool = False,
     ) -> None:
         self.setWindowTitle(title or "详细结果")
         self.title_label.setText(title or "详细结果")
         self._full_text = full_text or self._content_text(content or {})
-        self.browser.setPlainText(self._full_text)
+        safe_sources = self._safe_sources(sources or []) if show_sources else []
+        if safe_sources:
+            self.browser.setHtml(self._result_html(self._full_text, safe_sources))
+        else:
+            self.browser.setPlainText(self._full_text)
         self.show()
         if anchor is not None and screen is not None:
             self.position_near(anchor, screen)
@@ -116,3 +124,36 @@ class LongResponsePanel(QDialog):
             if body:
                 sections.append(f"{title}\n{body}")
         return "\n\n".join(sections)
+
+    @staticmethod
+    def _safe_sources(sources: list[dict[str, Any]]) -> list[dict[str, str]]:
+        safe: list[dict[str, str]] = []
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            url = str(source.get("url") or "").strip()
+            try:
+                parsed = urlsplit(url)
+            except ValueError:
+                continue
+            if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+                continue
+            domain = str(source.get("domain") or parsed.hostname).strip()
+            safe.append({
+                "title": str(source.get("title") or domain or url),
+                "url": url,
+                "domain": domain,
+            })
+        return safe
+
+    @staticmethod
+    def _result_html(text: str, sources: list[dict[str, str]]) -> str:
+        body = escape(text).replace("\n", "<br>")
+        links = []
+        for source in sources:
+            title = escape(source["title"])
+            url = escape(source["url"], quote=True)
+            domain = escape(source["domain"])
+            suffix = f" <span>({domain})</span>" if domain else ""
+            links.append(f'<li><a href="{url}">{title}</a>{suffix}</li>')
+        return f"<p>{body}</p><hr><h3>来源</h3><ol>{''.join(links)}</ol>"

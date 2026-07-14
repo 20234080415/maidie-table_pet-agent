@@ -149,8 +149,61 @@ class RecentChatsDialog(QDialog):
         self.browser.setHtml("".join(parts))
 
     def _clear(self) -> None:
-        self.controller.clear_memory()
+        if not self.controller.clear_conversation_history():
+            QMessageBox.warning(self, "清除失败", "聊天记录未能删除，请稍后重试。")
+            return
         self.refresh()
+
+
+class MemorySettingsPage(QWidget):
+    def __init__(self, controller, parent=None):
+        super().__init__(parent)
+        self.controller = controller
+        layout = QVBoxLayout(self)
+        note = QLabel("聊天记录与长期记忆可以分别清除。长期记忆包括称呼、事实和偏好。")
+        note.setWordWrap(True)
+        clear_long_term = QPushButton("清除长期记忆")
+        clear_all = QPushButton("清除全部记忆")
+        clear_long_term.clicked.connect(self._clear_long_term_memory)
+        clear_all.clicked.connect(self._clear_all_memory)
+        layout.addWidget(note)
+        layout.addWidget(clear_long_term)
+        layout.addWidget(clear_all)
+        layout.addStretch()
+
+    def _clear_long_term_memory(self) -> bool:
+        return self._confirm_and_clear(
+            "确认清除长期记忆",
+            "这会删除已保存的称呼、用户事实、偏好和长期习惯，但保留聊天记录。是否继续？",
+            self.controller.clear_long_term_memory,
+        )
+
+    def _clear_all_memory(self) -> bool:
+        return self._confirm_and_clear(
+            "确认清除全部记忆",
+            "这会删除聊天记录、当前会话上下文以及所有长期记忆。此操作无法撤销，是否继续？",
+            self.controller.clear_all_memory,
+        )
+
+    def _confirm_and_clear(self, title: str, message: str, operation) -> bool:
+        answer = QMessageBox.question(
+            self,
+            title,
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return False
+        try:
+            success = bool(operation())
+        except Exception:
+            success = False
+        if not success:
+            QMessageBox.warning(self, "清除失败", "记忆未能删除，请稍后重试。")
+            return False
+        QMessageBox.information(self, "清除完成", "所选记忆已清除。")
+        return True
 
 
 class SettingsDialog(QDialog):
@@ -188,6 +241,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self._build_vision_tab(), "千问视觉")
         self.tabs.addTab(self._build_coding_agent_tab(), "工作区 / Coding Agent")
         self.tabs.addTab(self._build_proactive_tab(), "主动行为")
+        self.tabs.addTab(MemorySettingsPage(controller, self), "数据与记忆")
         if initial_tab:
             for index in range(self.tabs.count()):
                 if self.tabs.tabText(index) == initial_tab:

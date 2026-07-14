@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlsplit, urlunsplit
+
 from network.client import NetworkClient
 from network.schemas import NetworkResult
 
@@ -35,20 +37,10 @@ class SearchService:
             return NetworkResult(error=error, failure_reason=reason).to_dict()
         try:
             items = data.get("results", []) if isinstance(data, dict) else []
-            sources = [
-                {
-                    "title": str(item.get("title", "网页")),
-                    "url": str(item.get("url", "")),
-                    "snippet": str(item.get("content", ""))[:600],
-                }
-                for item in items[:5]
-                if isinstance(item, dict) and item.get("url")
-            ]
-            scores = [float(item.get("score", 1.0)) for item in items
-                      if isinstance(item, dict) and item.get("url")]
+            sources, snippets, scores = self._normalize_sources(items)
             summary = str(data.get("answer", "")).strip() if isinstance(data, dict) else ""
             if not summary:
-                summary = "\n".join(source["snippet"] for source in sources if source["snippet"])
+                summary = "\n".join(snippets)
             if not summary:
                 return NetworkResult(error="没有找到可用的联网结果。",
                                      failure_reason="EMPTY_RESULTS",
@@ -67,3 +59,43 @@ class SearchService:
         except (AttributeError, TypeError, ValueError) as exc:
             return NetworkResult(error=f"无法解析搜索结果：{exc}",
                                  failure_reason="UNKNOWN_ERROR").to_dict()
+
+    @staticmethod
+    def _normalize_sources(
+        items: list[object], limit: int = 5,
+    ) -> tuple[list[dict[str, str]], list[str], list[float]]:
+        sources: list[dict[str, str]] = []
+        snippets: list[str] = []
+        scores: list[float] = []
+        seen: set[tuple[str, str, int | None, str, str]] = set()
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            raw_url = str(item.get("url") or "").strip()
+            try:
+                parsed = urlsplit(raw_url)
+                scheme = parsed.scheme.lower()
+                if scheme not in {"http", "https"} or not parsed.hostname:
+                    continue
+                port = parsed.port
+            except ValueError:
+                continue
+            path_key = parsed.path.rstrip("/") or "/"
+            key = (scheme, parsed.hostname.lower(), port, path_key, parsed.query)
+            if key in seen:
+                continue
+            seen.add(key)
+            sources.append({
+                "title": str(item.get("title") or parsed.hostname),
+                "url": urlunsplit(
+                    (parsed.scheme, parsed.netloc, parsed.path, parsed.query, "")
+                ),
+                "domain": parsed.hostname.lower(),
+            })
+            snippet = str(item.get("content") or "").strip()[:600]
+            if snippet:
+                snippets.append(snippet)
+            scores.append(float(item.get("score", 1.0)))
+            if len(sources) >= limit:
+                break
+        return sources, snippets, scores

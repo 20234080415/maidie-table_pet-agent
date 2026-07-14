@@ -35,6 +35,8 @@ class SearchTool(Tool):
                 raw = {"ok": False, "error": str(exc), "failure_reason": "NETWORK_ERROR"}
             except Exception as exc:
                 raw = {"ok": False, "error": str(exc), "failure_reason": "UNKNOWN_ERROR"}
+        raw = dict(raw)
+        raw["show_sources"] = bool(getattr(self.network_plugin, "show_sources", True))
         count = int(raw.get("result_count", len(raw.get("sources", []) or [])))
         raw["query"] = query
         reason = str(raw.get("failure_reason", ""))
