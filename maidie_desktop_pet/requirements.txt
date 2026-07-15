@@ -3,6 +3,7 @@ requests>=2.31
 Pillow>=10.0
 openai>=1.30
 pytesseract>=0.3.13
+pypdf>=5.0
 
 # Optional for future voice / TTS plugin:
 # edge-tts>=6.1.9

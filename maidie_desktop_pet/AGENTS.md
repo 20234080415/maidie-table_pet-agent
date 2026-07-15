@@ -4,7 +4,7 @@
 
 Maidie Desktop Pet is a Python + PyQt6 desktop AI pet and local desktop Agent. It includes desktop pet UI, animation, interaction, Brain-based Agent routing, structured tools, optional screen/vision understanding, local memory, and strict privacy boundaries.
 
-Maidie is not a generic command executor. Do not add unrestricted shell, file deletion, silent screenshot upload, or silent clipboard exfiltration.
+Maidie is not a generic command executor. Do not add unrestricted shell, permanent or bulk file deletion, silent screenshot upload, or silent clipboard exfiltration. Phase 6 permits only confirmed single-file deletion through the existing file safety pipeline and the system recycle bin.
 
 ---
 
@@ -128,6 +128,8 @@ unconfirmed destructive writes
 silent clipboard reading
 silent screenshot upload
 ```
+
+The Phase 6 `delete_file` exception is narrowly defined: it must pass `FilePermissionPolicy`, target one ordinary file inside an explicitly writable workspace, reject workspace roots, directories, protected Maidie/system paths, symlinks, junctions, and reparse points, use the existing `ConfirmationBroker` for two confirmations, move the file to the system recycle bin rather than permanently deleting it, verify the original path is gone, and write a content-free audit record. Permanent deletion, batch deletion, directory deletion, and recycle-bin clearing remain forbidden.
 
 Planner output is not trusted. Executor must validate permissions and parameters again.
 

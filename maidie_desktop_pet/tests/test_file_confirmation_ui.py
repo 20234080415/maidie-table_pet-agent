@@ -32,6 +32,22 @@ class FileConfirmationUiTests(unittest.TestCase):
         self.assertNotIn("secret", message)
         self.assertIn("safe", message)
 
+    def test_modify_and_delete_preview_shows_diff_scope_and_recycle_details(self) -> None:
+        message = format_system_confirmation("delete_file", {"file_plan": {
+            "operation": "delete_file", "workspace": "Primary",
+            "source": r"C:\project\old.txt", "risk": "high",
+            "risk_reasons": ["delete_file"], "estimated_items": 1,
+            "impact_scope": "single_file", "recycle_bin": True,
+            "file_details": {"size": 42, "created_time": 123.0},
+            "diff": "--- old\n+++ new\n-old\n+new", "confirmation_stage": 2,
+        }})
+
+        for expected in (
+            "single_file", "42 字节", "进入回收站：是", "第二次确认",
+            "变更预览", "-old", "+new",
+        ):
+            self.assertIn(expected, message)
+
 
 if __name__ == "__main__":
     unittest.main()

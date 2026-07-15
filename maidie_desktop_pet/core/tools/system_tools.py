@@ -28,14 +28,14 @@ class SystemTool(Tool):
     """对显式 OS 操作实施 deny-by-default 与二次确认。
 
     实例由 ToolRegistry 持有，可注入确认回调和剪贴板写入器；每次 ``execute`` 独立
-    校验 action，禁止任意 shell、脚本执行和删除路径。
+        校验 action，禁止任意 shell、脚本执行和未确认的删除路径。
     """
 
     name = "system"
     DANGEROUS_ACTIONS = {"delete_file", "execute_script", "system_command", "screenshot"}
     CONFIRMATION_ACTIONS = {"create_file", "open_app", "open_folder", "switch_window", "copy_clipboard"}
-    READ_ONLY_ACTIONS = {"read_file", "search_files"}
-    FILE_ALIASES = {"read_file": "read_text_file", "create_file": "create_text_file"}
+    READ_ONLY_ACTIONS = {"read_file", "search_files", "describe_file_access"}
+    FILE_ALIASES = {"create_file": "create_text_file"}
     APPS = {"notepad": ["notepad.exe"], "vscode": ["code"],
             "chrome": ["cmd", "/c", "start", "", "chrome"]}
     PATTERN = re.compile(r"读取文件|搜索文件|查找文件|创建文件|打开应用|打开文件夹|切换窗口|截图|剪贴板|notepad|vscode|chrome", re.I)
@@ -72,6 +72,8 @@ class SystemTool(Tool):
         主动移除 Planner 伪造的同名参数。
         """
         params = dict(params or {})
+        if action == "describe_file_access":
+            return {"type": "system", "raw": self.file_policy.describe_access(), "source": "local"}
         file_action = self.FILE_ALIASES.get(action, action)
         if file_action in FILE_OPERATIONS:
             file_params = self._normalize_file_params(action, params)
@@ -111,11 +113,17 @@ class SystemTool(Tool):
             raw = getattr(self, f"_{action}")(params)
             return {"type": "system", "raw": {"action": action, **raw}, "source": "local"}
         except Exception as exc:
-            return {"type": "system", "raw": {"action": action, "error": str(exc)}, "source": "local"}
+            return {"type": "system", "raw": {
+                "ok": False, "operation": action, "action": action, "error": str(exc),
+                "message": str(exc), "data": None,
+            }, "source": "local"}
 
     @staticmethod
     def _denied(action: str, reason: str) -> ToolResult:
-        return {"type": "system", "raw": {"action": action, "error": reason, "denied": True}, "source": "local"}
+        return {"type": "system", "raw": {
+            "ok": False, "operation": action, "action": action, "error": reason,
+            "message": reason, "denied": True, "data": None,
+        }, "source": "local"}
 
     def _normalize_file_params(self, action: str, params: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(params)

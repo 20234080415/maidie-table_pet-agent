@@ -13,15 +13,54 @@ import ntpath
 import os
 import stat
 import time
+import ctypes
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PureWindowsPath
 from typing import Any, Callable
 from uuid import uuid4
 
 
-READ_OPERATIONS = {"list_directory", "stat_file", "search_files", "read_text_file"}
-WRITE_OPERATIONS = {"create_text_file", "copy_file", "move_file", "rename_file"}
+READ_OPERATIONS = {
+    "list_directory", "stat_file", "search_files", "read_text_file", "read_file",
+}
+WRITE_OPERATIONS = {
+    "create_text_file", "copy_file", "move_file", "rename_file",
+    "append_file", "replace_exact", "delete_file",
+}
 FILE_OPERATIONS = READ_OPERATIONS | WRITE_OPERATIONS
+TEXT_MUTATION_OPERATIONS = {"append_file", "replace_exact"}
+
+
+SYSTEM_DIRECTORY_ALIASES = {
+    "desktop": ("desktop", "Desktop"),
+    "桌面": ("desktop", "Desktop"),
+    "documents": ("documents", "Documents"),
+    "document": ("documents", "Documents"),
+    "文档": ("documents", "Documents"),
+    "downloads": ("downloads", "Downloads"),
+    "download": ("downloads", "Downloads"),
+    "下载": ("downloads", "Downloads"),
+    "pictures": ("pictures", "Pictures"),
+    "picture": ("pictures", "Pictures"),
+    "图片": ("pictures", "Pictures"),
+    "music": ("music", "Music"),
+    "音乐": ("music", "Music"),
+    "videos": ("videos", "Videos"),
+    "video": ("videos", "Videos"),
+    "视频": ("videos", "Videos"),
+    "home": ("home", "Home"),
+    "用户目录": ("home", "Home"),
+    "主目录": ("home", "Home"),
+}
+
+KNOWN_FOLDER_IDS = {
+    "desktop": "{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}",
+    "documents": "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}",
+    "downloads": "{374DE290-123F-4565-9164-39C4925E467B}",
+    "pictures": "{33E28130-4E1E-4676-835A-98395C3BC3BB}",
+    "music": "{4BD8D571-6D19-48D3-BE97-422220080E43}",
+    "videos": "{18989B1D-99B5-455B-841C-AB7C74E4DDFC}",
+}
 
 
 class FilePermissionError(ValueError):
@@ -68,6 +107,10 @@ class FileOperationPlan:
     requires_confirmation: bool
     overwrite: bool
     estimated_items: int
+    diff: str
+    impact_scope: str
+    recycle_bin: bool
+    file_details: dict[str, Any] | None
     created_at: float
     fingerprint: str
 
@@ -84,6 +127,10 @@ class FileOperationPlan:
             "risk": self.risk,
             "risk_reasons": list(self.risk_reasons),
             "estimated_items": self.estimated_items,
+            "diff": self.diff,
+            "impact_scope": self.impact_scope,
+            "recycle_bin": self.recycle_bin,
+            "file_details": dict(self.file_details or {}),
             "fingerprint": self.fingerprint,
         }
 
@@ -196,13 +243,22 @@ class FilePermissionPolicy:
         source_state = self.capture_state(resolved_source) if resolved_source else None
         destination_state = self.capture_state(resolved_destination) if resolved_destination else None
         content_bytes = str(content).encode("utf-8")
-        content_hash = hashlib.sha256(content_bytes).hexdigest() if operation == "create_text_file" else None
+        content_bound = operation in {"create_text_file", *TEXT_MUTATION_OPERATIONS}
+        content_hash = hashlib.sha256(content_bytes).hexdigest() if content_bound else None
 
         relevant = [path for path in (resolved_source, resolved_destination) if path is not None]
         matches = [self._workspace_for(path) for path in relevant]
         is_write = operation in WRITE_OPERATIONS
+        if operation in TEXT_MUTATION_OPERATIONS | {"delete_file"}:
+            if any(match is None or match.mode != "read_write" for match in matches):
+                raise FilePermissionError(
+                    "permission_denied",
+                    "modification and deletion require an explicitly writable workspace",
+                )
         outside = any(match is None or (is_write and match.mode == "read_only") for match in matches)
-        overwrite = bool(destination_state and destination_state.exists)
+        overwrite = bool(destination_state and destination_state.exists) or (
+            operation in TEXT_MUTATION_OPERATIONS
+        )
         reasons: list[str] = []
         if is_write:
             reasons.append(operation)
@@ -210,7 +266,9 @@ class FilePermissionPolicy:
             reasons.append("outside_configured_workspace")
         if overwrite:
             reasons.append("overwrite_existing_file")
-        risk = "high" if outside or overwrite else ("medium" if is_write else "low")
+        risk = "high" if operation == "delete_file" or outside or overwrite else (
+            "medium" if is_write else "low"
+        )
         requires_confirmation = is_write or outside
         names = tuple(dict.fromkeys(
             match.name for match in matches if match is not None and not (is_write and match.mode == "read_only")
@@ -225,7 +283,7 @@ class FilePermissionPolicy:
             resolved_destination=str(resolved_destination) if resolved_destination else None,
             source_state=source_state,
             destination_state=destination_state,
-            content_size=len(content_bytes) if operation == "create_text_file" else 0,
+            content_size=len(content_bytes) if content_bound else 0,
             content_sha256=content_hash,
             workspace_names=names,
             risk=risk,
@@ -233,10 +291,62 @@ class FilePermissionPolicy:
             requires_confirmation=requires_confirmation,
             overwrite=overwrite,
             estimated_items=1,
+            diff="",
+            impact_scope="single_file",
+            recycle_bin=operation == "delete_file",
+            file_details=self._file_details(resolved_source) if operation == "delete_file" else None,
             created_at=self.clock(),
             fingerprint="",
         )
         return replace(plan, fingerprint=self._fingerprint(plan))
+
+    def with_diff(self, plan: FileOperationPlan, diff: str) -> FileOperationPlan:
+        updated = replace(plan, diff=str(diff), fingerprint="")
+        return replace(updated, fingerprint=self._fingerprint(updated))
+
+    def describe_access(self) -> dict[str, Any]:
+        rules = [
+            {
+                "workspace_id": rule.id,
+                "name": rule.name,
+                "root": str(rule.root),
+                "mode": rule.mode,
+                "readable": True,
+                "writable": rule.mode == "read_write",
+                "explicit": rule.explicit,
+            }
+            for rule in self.workspaces
+        ]
+        aliases = []
+        for alias_id, label in (
+            ("desktop", "Desktop"),
+            ("documents", "Documents"),
+            ("downloads", "Downloads"),
+        ):
+            path = self.resolve_system_directory(alias_id)
+            match = self._workspace_for(path) if path else None
+            aliases.append({
+                "id": alias_id,
+                "name": label,
+                "path": str(path) if path else None,
+                "accessible": match is not None,
+                "mode": match.mode if match else None,
+                "workspace_id": match.id if match else None,
+            })
+        result = {
+            "workspaces": rules,
+            "system_directories": aliases,
+            "primary_workspace_id": self.primary.id if self.primary else None,
+        }
+        return {
+            "ok": True,
+            "operation": "describe_file_access",
+            "path": None,
+            "result": result,
+            "error_code": None,
+            "message": "",
+            **result,
+        }
 
     def revalidate(self, plan: FileOperationPlan, *, content: str = "") -> None:
         source = self._normalize(plan.requested_source, destination=False) if plan.requested_source else None
@@ -248,7 +358,7 @@ class FilePermissionPolicy:
             raise FilePermissionError("file_state_changed", "source changed after confirmation")
         if destination and self.capture_state(destination) != plan.destination_state:
             raise FilePermissionError("file_state_changed", "destination changed after confirmation")
-        if plan.operation == "create_text_file":
+        if plan.operation in {"create_text_file", *TEXT_MUTATION_OPERATIONS}:
             content_bytes = str(content).encode("utf-8")
             if (len(content_bytes) != plan.content_size
                     or hashlib.sha256(content_bytes).hexdigest() != plan.content_sha256):
@@ -257,7 +367,8 @@ class FilePermissionPolicy:
     def _normalize(self, raw: str | None, *, destination: bool) -> Path:
         text = str(raw or "").strip()
         self._validate_raw_path(text)
-        expanded = Path(text).expanduser()
+        alias_path = self._resolve_alias_path(text)
+        expanded = alias_path if alias_path is not None else Path(text).expanduser()
         if not expanded.is_absolute():
             if self.primary is None:
                 raise FilePermissionError("workspace_not_configured", "relative paths need a primary workspace")
@@ -274,6 +385,102 @@ class FilePermissionPolicy:
             raise FilePermissionError("path_not_found", f"path does not exist: {candidate}") from exc
         self._assert_safe_real_path(resolved)
         return resolved
+
+    def _resolve_alias_path(self, text: str) -> Path | None:
+        normalized = text.strip().replace("\\", "/")
+        if not normalized or normalized.startswith((".", "~", "/")):
+            return None
+        parts = [part for part in normalized.split("/") if part]
+        if not parts:
+            return None
+        alias = SYSTEM_DIRECTORY_ALIASES.get(parts[0].lower()) or SYSTEM_DIRECTORY_ALIASES.get(parts[0])
+        if alias is None:
+            return None
+        alias_id, _label = alias
+        root = self.resolve_system_directory(alias_id)
+        if root is None:
+            raise FilePermissionError("PATH_NOT_RESOLVED", f"system directory is not available: {parts[0]}")
+        candidate = root
+        for part in parts[1:]:
+            candidate /= part
+        return candidate
+
+    def resolve_system_directory(self, alias_id: str) -> Path | None:
+        alias_id = str(alias_id).lower()
+        if alias_id == "home":
+            return self.home
+        resolver = self.options.get("system_directory_resolver")
+        if callable(resolver):
+            value = resolver(alias_id)
+            return Path(value).expanduser().resolve(strict=False) if value else None
+        if os.name == "nt":
+            return self._windows_known_folder(alias_id) or self._windows_user_shell_folder(alias_id)
+        fallback_names = {
+            "desktop": "Desktop",
+            "documents": "Documents",
+            "downloads": "Downloads",
+            "pictures": "Pictures",
+            "music": "Music",
+            "videos": "Videos",
+        }
+        name = fallback_names.get(alias_id)
+        return (self.home / name).resolve(strict=False) if name else None
+
+    @staticmethod
+    def _windows_known_folder(alias_id: str) -> Path | None:
+        folder_id = KNOWN_FOLDER_IDS.get(alias_id)
+        if not folder_id:
+            return None
+        try:
+            from ctypes import wintypes
+
+            class GUID(ctypes.Structure):
+                _fields_ = [
+                    ("Data1", ctypes.c_ulong),
+                    ("Data2", ctypes.c_ushort),
+                    ("Data3", ctypes.c_ushort),
+                    ("Data4", ctypes.c_ubyte * 8),
+                ]
+
+            guid = GUID()
+            ctypes.windll.ole32.CLSIDFromString(folder_id, ctypes.byref(guid))
+            path_ptr = ctypes.c_wchar_p()
+            result = ctypes.windll.shell32.SHGetKnownFolderPath(
+                ctypes.byref(guid), 0, None, ctypes.byref(path_ptr),
+            )
+            if result != 0 or not path_ptr.value:
+                return None
+            value = path_ptr.value
+            ctypes.windll.ole32.CoTaskMemFree(path_ptr)
+            return Path(value).expanduser().resolve(strict=False)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _windows_user_shell_folder(alias_id: str) -> Path | None:
+        names = {
+            "desktop": "Desktop",
+            "documents": "Personal",
+            "downloads": "{374DE290-123F-4565-9164-39C4925E467B}",
+            "pictures": "My Pictures",
+            "music": "My Music",
+            "videos": "My Video",
+        }
+        name = names.get(alias_id)
+        if not name:
+            return None
+        try:
+            import winreg
+
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
+            ) as key:
+                value, _kind = winreg.QueryValueEx(key, name)
+            expanded = os.path.expandvars(str(value))
+            return Path(expanded).expanduser().resolve(strict=False)
+        except Exception:
+            return None
 
     def _validate_raw_path(self, text: str) -> None:
         if not text:
@@ -348,17 +555,25 @@ class FilePermissionPolicy:
     @staticmethod
     def _validate_required_fields(operation: str, source: str | None,
                                   destination: str | None) -> None:
-        if operation in {"list_directory", "stat_file", "search_files", "read_text_file"} and not source:
+        if operation in {
+            "list_directory", "stat_file", "search_files", "read_text_file", "read_file",
+            "append_file", "replace_exact", "delete_file",
+        } and not source:
             raise FilePermissionError("source_required", "source path is required")
         if operation == "create_text_file" and not destination:
             raise FilePermissionError("destination_required", "destination path is required")
         if operation in {"copy_file", "move_file", "rename_file"} and (not source or not destination):
             raise FilePermissionError("paths_required", "source and destination are required")
 
-    @staticmethod
-    def _validate_operation_types(operation: str, source: Path | None,
+    def _validate_operation_types(self, operation: str, source: Path | None,
                                   destination: Path | None) -> None:
-        if operation in {"read_text_file", "copy_file", "move_file", "rename_file"}:
+        if operation == "delete_file" and source is not None:
+            if any(source == rule.root for rule in self.workspaces):
+                raise FilePermissionError("workspace_root_forbidden", "workspace roots cannot be deleted")
+        if operation in {
+            "read_text_file", "read_file", "copy_file", "move_file", "rename_file",
+            "append_file", "replace_exact", "delete_file",
+        }:
             if source is None or not source.is_file():
                 raise FilePermissionError("source_not_file", "source must be an existing file")
         if operation in {"list_directory", "search_files"}:
@@ -379,6 +594,19 @@ class FilePermissionPolicy:
         if kind == "file":
             digest = FilePermissionPolicy.sha256(path)
         return FileState(True, kind, int(info.st_size), int(info.st_mtime_ns), digest)
+
+    @staticmethod
+    def _file_details(path: Path | None) -> dict[str, Any] | None:
+        if path is None or not path.is_file():
+            return None
+        info = path.stat()
+        return {
+            "path": str(path),
+            "size": int(info.st_size),
+            "created_time": float(info.st_ctime),
+            "modified_time": float(info.st_mtime),
+            "type": "file",
+        }
 
     @staticmethod
     def sha256(path: Path) -> str:

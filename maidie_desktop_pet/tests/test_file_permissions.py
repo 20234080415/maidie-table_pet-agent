@@ -99,6 +99,29 @@ class FilePermissionPolicyTests(unittest.TestCase):
                 with self.assertRaises(FilePermissionError):
                     self.policy.build_plan(operation, **arguments)
 
+    def test_delete_rejects_system_and_maidie_protected_paths(self) -> None:
+        app_root = self.base / "maidie-app"
+        protected_file = app_root / "config" / "config.json"
+        protected_file.parent.mkdir(parents=True)
+        protected_file.write_text("{}", encoding="utf-8")
+        policy = FilePermissionPolicy(
+            {"root": str(self.base), "allow_home_read_only": False},
+            app_root=app_root,
+        )
+
+        with self.assertRaisesRegex(FilePermissionError, "protected_path"):
+            policy.build_plan("delete_file", source=str(protected_file))
+        with self.assertRaisesRegex(FilePermissionError, "protected_path"):
+            policy.build_plan("delete_file", source=os.environ.get("WINDIR", r"C:\Windows"))
+
+    def test_text_mutation_still_rejects_reparse_points(self) -> None:
+        source = self.primary / "notes.txt"
+        source.write_text("before", encoding="utf-8")
+
+        with patch.object(self.policy, "_is_reparse_point", side_effect=lambda path: path == source):
+            with self.assertRaisesRegex(FilePermissionError, "reparse_point"):
+                self.policy.build_plan("append_file", source=str(source), content="after")
+
     def test_symlink_or_reparse_component_is_rejected(self) -> None:
         source = self.primary / "source.txt"
         source.write_text("data", encoding="utf-8")
@@ -166,6 +189,52 @@ class FilePermissionPolicyTests(unittest.TestCase):
 
         with self.assertRaisesRegex(FilePermissionError, "authorization_expired"):
             authorization.validate(plan, now=11.1)
+
+    @unittest.skipUnless(os.name == "nt", "real Known Folder lookup is Windows-specific")
+    def test_desktop_alias_resolves_to_current_windows_desktop(self) -> None:
+        desktop = self.policy.resolve_system_directory("desktop")
+
+        self.assertIsNotNone(desktop)
+        self.assertTrue(desktop.is_absolute())
+
+    def test_system_directory_aliases_resolve_from_configured_resolver(self) -> None:
+        desktop = self.base / "OneDrive" / "Desktop"
+        downloads = self.base / "Downloads"
+        documents = self.base / "Documents"
+        for path in (desktop, downloads, documents):
+            path.mkdir(parents=True)
+        policy = FilePermissionPolicy({
+            "root": str(self.primary),
+            "workspaces": [{"id": "desktop", "name": "Desktop", "path": str(desktop)}],
+            "allow_home_read_only": False,
+            "system_directory_resolver": {
+                "desktop": desktop,
+                "downloads": downloads,
+                "documents": documents,
+            }.get,
+        })
+
+        desktop_plan = policy.build_plan("list_directory", source="桌面")
+        download_plan = policy.build_plan("list_directory", source="downloads")
+        document_plan = policy.build_plan("list_directory", source="文档")
+
+        self.assertEqual(Path(desktop_plan.resolved_source), desktop)
+        self.assertEqual(Path(download_plan.resolved_source), downloads)
+        self.assertEqual(Path(document_plan.resolved_source), documents)
+
+    def test_system_directory_alias_resolution_still_uses_permission_policy(self) -> None:
+        downloads = self.base / "Downloads"
+        downloads.mkdir()
+        policy = FilePermissionPolicy({
+            "root": str(self.primary),
+            "allow_home_read_only": False,
+            "system_directory_resolver": {"downloads": downloads}.get,
+        })
+
+        plan = policy.build_plan("list_directory", source="下载")
+
+        self.assertTrue(plan.requires_confirmation)
+        self.assertIn("outside_configured_workspace", plan.risk_reasons)
 
 
 if __name__ == "__main__":

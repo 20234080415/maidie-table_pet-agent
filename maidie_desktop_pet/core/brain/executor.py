@@ -20,6 +20,9 @@ class BrainExecutor:
         "weather", "time", "search", "screen", "memory", "system", "codex", "opencode",
         "coding_agent",
     }
+    FILE_CONTINUATION_GOALS = {
+        "summary", "analysis", "explain", "extract", "review", "search_related",
+    }
 
     def __init__(self, tool_registry: Any) -> None:
         self.tool_registry = tool_registry
@@ -63,13 +66,109 @@ class BrainExecutor:
                 safe_result = self._error(tool_name, str(exc))
             safe_result.pop("text", None)
             raw = safe_result.get("raw", {})
-            executions.append({
+            if tool_name == "system" and isinstance(raw, dict):
+                raw = self._observe_system_result(params, raw)
+                safe_result["raw"] = raw
+            raw_ok = raw.get("ok") if isinstance(raw, dict) else None
+            execution = {
                 "index": index,
                 "tool": tool_name,
-                "ok": isinstance(raw, dict) and not bool(raw.get("error")),
+                "ok": bool(raw_ok) if isinstance(raw_ok, bool) else (
+                    isinstance(raw, dict) and not bool(raw.get("error"))
+                ),
                 "data": safe_result,
-            })
+            }
+            continuation = self._file_continuation(tool_name, params, raw, execution["ok"])
+            if continuation is not None:
+                execution["continuation"] = continuation
+            executions.append(execution)
         return executions
+
+    @staticmethod
+    def _observe_system_result(params: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]:
+        observed = dict(raw)
+        operation = str(
+            observed.get("operation") or params.get("operation") or params.get("action") or ""
+        )
+        succeeded = observed.get("ok") is True or (
+            "ok" not in observed and not bool(observed.get("error"))
+        )
+        observed.setdefault("ok", succeeded)
+        observed.setdefault("operation", operation)
+        if operation in {"read_file", "read_text_file"}:
+            observed.setdefault("path", str(params.get("source") or ""))
+        if succeeded:
+            observed.setdefault("data", observed.get("result", {}))
+            try:
+                result_count = int(observed.get("result_count") or 0)
+            except (TypeError, ValueError):
+                result_count = len(observed.get("items") or [])
+            observations = {
+                "read_file": "file_loaded", "read_text_file": "file_loaded",
+                "search_files": "files_found" if result_count else "no_matches",
+                "list_directory": "directory_loaded",
+            }
+            observed.setdefault("observation", observations.get(operation, "operation_completed"))
+            observed.setdefault("recoverable", False)
+            observed.setdefault("suggestions", [])
+            return observed
+
+        code = str(observed.get("error_code") or "").strip().lower()
+        security_codes = {
+            "protected_path", "path_escape", "reparse_point", "device_path", "unc_path",
+            "ntfs_ads", "drive_root", "workspace_root_forbidden", "user_cancelled",
+            "authorization_mismatch", "authorization_expired",
+        }
+        not_found_codes = {
+            "path_not_found", "source_not_file", "path_not_resolved", "file_not_found",
+        }
+        parameter_codes = {
+            "path_required", "source_required", "destination_required", "paths_required",
+            "invalid_path", "unsupported_operation",
+        }
+        type_codes = {"binary_file", "invalid_docx", "invalid_pdf", "unsupported_file_type"}
+        if code in not_found_codes:
+            observation, recoverable = "file_not_found", True
+            suggestions = ["search_similar_file", "list_directory"]
+        elif code in parameter_codes:
+            observation, recoverable = "invalid_parameters", True
+            suggestions = ["correct_parameters"]
+        elif code in type_codes:
+            observation, recoverable = "unsupported_file", True
+            suggestions = ["search_similar_file"]
+        elif code == "permission_denied":
+            observation, recoverable = "permission_required", True
+            suggestions = ["request_permission"]
+        else:
+            observation, recoverable = (
+                "security_blocked" if code in security_codes else "operation_failed",
+                False,
+            )
+            suggestions = []
+        observed.setdefault("observation", observation)
+        observed.setdefault("recoverable", recoverable)
+        observed.setdefault("suggestions", suggestions)
+        observed.setdefault("data", None)
+        return observed
+
+    @classmethod
+    def _file_continuation(cls, tool_name: str, params: dict[str, Any],
+                           raw: Any, succeeded: bool) -> dict[str, Any] | None:
+        operation = str(params.get("operation") or params.get("action") or "")
+        goal = str(params.get("goal") or "none").strip().lower()
+        if (tool_name != "system" or operation not in {"read_file", "read_text_file"}
+                or goal not in cls.FILE_CONTINUATION_GOALS or not succeeded
+                or not isinstance(raw, dict) or raw.get("ok") is False):
+            return None
+        result = raw.get("result") if isinstance(raw.get("result"), dict) else {}
+        return {
+            "type": "file_content",
+            "content": str(raw.get("content") or result.get("content") or ""),
+            "file_type": str(raw.get("file_type") or result.get("file_type") or "text"),
+            "next_action": goal,
+            "path": str(raw.get("path") or raw.get("resolved_path")
+                        or params.get("source") or ""),
+        }
 
     @staticmethod
     def _resolve_dependent_params(name: str, params: dict[str, Any],
@@ -109,10 +208,38 @@ class BrainExecutor:
             if name == "system" and hasattr(tool, "execute"):
                 operation = str(safe_params.get("operation") or safe_params.get("action") or "")
                 if operation:
+                    recovery_confirmation = bool(
+                        safe_params.pop("recovery_requires_confirmation", False)
+                    )
+                    recovery_original = str(safe_params.pop("recovery_original_path", "") or "")
+                    if recovery_confirmation and operation in {"read_file", "read_text_file"}:
+                        callback = getattr(tool, "confirmation_callback", None)
+                        approved = bool(callback and callback("read_file_recovery", {
+                            "recovery_plan": {
+                                "operation": operation,
+                                "path": str(safe_params.get("source") or ""),
+                                "original_path": recovery_original,
+                                "risk": "medium",
+                                "requires_confirmation": True,
+                                "impact_scope": "single_file",
+                            },
+                        }))
+                        if not approved:
+                            return {"type": "system", "source": "local", "raw": {
+                                "ok": False, "operation": operation,
+                                "path": str(safe_params.get("source") or ""),
+                                "error": "user confirmation required",
+                                "error_code": "user_cancelled",
+                                "message": "用户没有确认读取恢复候选文件",
+                                "data": None, "result": None,
+                            }}
                     if operation in FILE_OPERATIONS:
                         safe_params = {
                             key: value for key, value in safe_params.items()
-                            if key in {"operation", "source", "destination", "content"}
+                            if key in {
+                                "operation", "source", "destination", "content",
+                                "pattern", "limit", "encoding", "old_text", "new_text",
+                            }
                         }
                     return tool.execute(operation, safe_params)
             if name == "memory":

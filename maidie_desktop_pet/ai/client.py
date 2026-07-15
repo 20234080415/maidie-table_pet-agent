@@ -84,6 +84,12 @@ class AIClient(ABC):
         except (TypeError, ValueError):
             return result
 
+    def decide_recovery(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Use the client's strict-JSON path for one bounded recovery choice."""
+        from core.prompts.recovery import build_recovery_prompt
+
+        return self.route_intent(build_recovery_prompt(payload), [])
+
 
 class OpenAICompatibleClient(AIClient):
     """Reusable OpenAI-compatible backend for chat or Codex-style reasoning."""

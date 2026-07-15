@@ -18,6 +18,14 @@ class PersonaClient:
                 "emotion": "idle", "action": "talk", "state": "talking"}
 
 
+class EchoFileClient:
+    api_key = "configured"
+
+    def ask(self, _prompt, _context):
+        return {"text": "RAW FILE BODY", "emotion": "thinking",
+                "action": "talk", "state": "talking"}
+
+
 class SynthesizerTimeDeltaTests(unittest.TestCase):
     def test_structured_delta_response_uses_all_facts(self):
         synthesizer = Synthesizer(OfflineClient())
@@ -88,6 +96,152 @@ class SynthesizerTimeDeltaTests(unittest.TestCase):
             result = synthesizer.synthesize("分析项目", "code_task", None,
                 [{"tool": "coding_agent", "ok": False, "data": data}], "", [])
             self.assertIn(expected, result["text"])
+
+
+    def test_file_tool_failure_does_not_claim_directory_was_seen(self):
+        synthesizer = Synthesizer(OfflineClient())
+        data = {"type": "system", "source": "local", "raw": {
+            "ok": False,
+            "operation": "list_directory",
+            "error_code": "PATH_NOT_RESOLVED",
+            "message": "system directory is not available: 桌面",
+            "data": None,
+            "items": None,
+            "result_count": None,
+        }}
+
+        result = synthesizer.synthesize(
+            "查看我桌面有哪些文件", "system_task", None,
+            [{"tool": "system", "ok": False, "data": data}], "", [],
+        )
+
+        self.assertIn("没有成功访问", result["text"])
+        self.assertIn("PATH_NOT_RESOLVED", result["text"])
+        self.assertNotIn("没有找到", result["text"])
+        self.assertNotIn("快捷方式", result["text"])
+
+    def test_file_tool_empty_success_can_say_no_matches(self):
+        synthesizer = Synthesizer(OfflineClient())
+        data = {"type": "system", "source": "local", "raw": {
+            "ok": True,
+            "operation": "search_files",
+            "resolved_path": "C:/Users/demo/Desktop",
+            "workspace_id": "Desktop",
+            "result_count": 0,
+            "items": [],
+            "error_code": None,
+            "message": "",
+        }}
+
+        result = synthesizer.synthesize(
+            "列出桌面上的 md 文件", "system_task", None,
+            [{"tool": "system", "ok": True, "data": data}], "", [],
+        )
+
+        self.assertIn("没有找到", result["text"])
+        self.assertIn("C:/Users/demo/Desktop", result["text"])
+
+    def test_file_tool_listing_uses_structured_items_only(self):
+        synthesizer = Synthesizer(OfflineClient())
+        data = {"type": "system", "source": "local", "raw": {
+            "ok": True,
+            "operation": "search_files",
+            "resolved_path": "C:/Users/demo/Desktop",
+            "workspace_id": "Desktop",
+            "result_count": 1,
+            "items": [{"name": "actual.md", "path": "C:/Users/demo/Desktop/actual.md", "type": "file"}],
+            "error_code": None,
+            "message": "",
+        }}
+
+        result = synthesizer.synthesize(
+            "列出桌面上的 md 文件", "system_task", None,
+            [{"tool": "system", "ok": True, "data": data}], "", [],
+        )
+        text = result.get("panel_text", "") + result["text"]
+
+        self.assertIn("actual.md", text)
+        self.assertNotIn("快捷方式", text)
+
+    def test_file_access_response_reports_permissions(self):
+        synthesizer = Synthesizer(OfflineClient())
+        data = {"type": "system", "source": "local", "raw": {
+            "ok": True,
+            "operation": "describe_file_access",
+            "workspaces": [
+                {"workspace_id": "primary", "name": "Primary", "root": "C:/project",
+                 "mode": "read_write", "readable": True, "writable": True, "explicit": True},
+                {"workspace_id": "home-readonly", "name": "Home", "root": "C:/Users/demo",
+                 "mode": "read_only", "readable": True, "writable": False, "explicit": False},
+            ],
+            "system_directories": [
+                {"id": "desktop", "name": "Desktop", "path": "C:/Users/demo/Desktop",
+                 "accessible": True, "mode": "read_only", "workspace_id": "home-readonly"},
+                {"id": "documents", "name": "Documents", "path": "C:/Users/demo/Documents",
+                 "accessible": True, "mode": "read_only", "workspace_id": "home-readonly"},
+                {"id": "downloads", "name": "Downloads", "path": "C:/Users/demo/Downloads",
+                 "accessible": False, "mode": None, "workspace_id": None},
+            ],
+        }}
+
+        result = synthesizer.synthesize(
+            "你现在能看哪个文件夹", "system_task", None,
+            [{"tool": "system", "ok": True, "data": data}], "", [],
+        )
+        text = result.get("panel_text", "") + result["text"]
+
+        self.assertIn("C:/project", text)
+        self.assertIn("只读", text)
+        self.assertIn("Downloads 不可访问", text)
+
+    def test_file_write_and_delete_failures_cannot_be_presented_as_success(self):
+        synthesizer = Synthesizer(OfflineClient())
+        for operation in ("append_file", "replace_exact", "delete_file"):
+            data = {"type": "system", "source": "local", "raw": {
+                "ok": False, "operation": operation, "path": "C:/project/a.txt",
+                "error_code": "user_cancelled", "message": "用户取消了操作",
+                "result": None,
+            }}
+            result = synthesizer.synthesize(
+                "执行文件操作", "system_task", None,
+                [{"tool": "system", "ok": False, "data": data}], "", [],
+            )
+            self.assertIn("没有成功", result["text"])
+            self.assertNotIn("已经完成", result["text"])
+
+    def test_successful_document_read_uses_tool_content(self):
+        synthesizer = Synthesizer(OfflineClient())
+        data = {"type": "system", "source": "local", "raw": {
+            "ok": True, "operation": "read_file", "path": "C:/project/report.pdf",
+            "file_type": "pdf", "content": "Page one fact", "error_code": None,
+            "message": "", "result": {"metadata": {"pages": 1}},
+        }}
+
+        result = synthesizer.synthesize(
+            "读取报告", "system_task", None,
+            [{"tool": "system", "ok": True, "data": data}], "", [],
+        )
+
+        self.assertIn("Page one fact", result["text"])
+
+    def test_file_continuation_rejects_model_echo_of_full_source_content(self):
+        synthesizer = Synthesizer(EchoFileClient())
+        data = {"type": "system", "source": "local", "raw": {
+            "ok": True, "operation": "read_file", "path": "test.txt",
+            "file_type": "text", "content": "RAW FILE BODY",
+        }}
+
+        result = synthesizer.synthesize(
+            "读取test.txt总结一下", "system_task", {"task_goal": "summary"},
+            [{"tool": "system", "ok": True, "data": data, "continuation": {
+                "type": "file_content", "content": "RAW FILE BODY",
+                "file_type": "text", "next_action": "summary", "path": "test.txt",
+            }}], "", [],
+        )
+
+        rendered = str(result.get("panel_text") or result["text"])
+        self.assertNotIn("RAW FILE BODY", rendered)
+        self.assertIn("不能可靠完成总结", rendered)
 
 
 if __name__ == "__main__": unittest.main()

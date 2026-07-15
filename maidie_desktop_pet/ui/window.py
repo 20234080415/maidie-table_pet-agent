@@ -23,11 +23,12 @@ from core.vision.region_selector import RegionSelector
 
 
 def format_system_confirmation(action: str, params: dict) -> str:
-    """Build a content-free UI preview for a confirmation request."""
+    """Build a bounded, structured UI preview for a confirmation request."""
     plan = params.get("file_plan") if isinstance(params, dict) else None
     if isinstance(plan, dict):
         reasons = ", ".join(str(item) for item in plan.get("risk_reasons", [])) or "无"
-        return "\n".join([
+        details = plan.get("file_details") if isinstance(plan.get("file_details"), dict) else {}
+        lines = [
             f"操作类型：{plan.get('operation') or action}",
             f"工作区：{plan.get('workspace') or '工作区外单次授权'}",
             f"源路径：{plan.get('source') or '无'}",
@@ -37,7 +38,20 @@ def format_system_confirmation(action: str, params: dict) -> str:
             f"风险等级：{plan.get('risk') or 'unknown'}",
             f"风险原因：{reasons}",
             f"预计影响数量：{int(plan.get('estimated_items') or 0)}",
-        ])
+            f"影响范围：{plan.get('impact_scope') or 'single_file'}",
+        ]
+        if details:
+            lines.extend([
+                f"文件大小：{int(details.get('size') or 0)} 字节",
+                f"创建时间：{details.get('created_time') or '未知'}",
+                f"进入回收站：{'是' if plan.get('recycle_bin') else '否'}",
+            ])
+        if plan.get("confirmation_stage") == 2:
+            lines.append("确认阶段：第二次确认")
+        diff = str(plan.get("diff") or "").strip()
+        if diff:
+            lines.extend(["变更预览：", diff[:12000]])
+        return "\n".join(lines)
     safe_params = {
         key: value for key, value in (params.items() if isinstance(params, dict) else [])
         if key not in {"content", "text", "authorization", "fingerprint"}

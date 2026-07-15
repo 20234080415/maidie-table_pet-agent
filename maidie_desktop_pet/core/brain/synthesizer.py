@@ -47,6 +47,9 @@ class Synthesizer:
         client = self.codex_client if technical else self.chat_client
         prompt = self._prompt(user_input, source, plan, tool_data, memory_context)
         display: dict[str, Any] = {}
+        file_result = self._system_file_result(tool_data)
+        file_continuation = self._file_continuation(tool_data)
+        file_recovery_response = self._file_recovery_response(tool_data)
         # 可确定的澄清、失败和简单事实优先本地合成，LLM 只处理需要语言推理的结果。
         if source == "clarification":
             mark(local_response_used=True)
@@ -74,6 +77,15 @@ class Synthesizer:
         elif any(item.get("tool") == "coding_agent" for item in tool_data):
             mark(local_response_used=True)
             normalized = self._local_fallback(source, tool_data)
+        elif file_recovery_response is not None and file_continuation is None:
+            mark(local_response_used=True)
+            normalized = file_recovery_response
+        elif file_result is not None and file_continuation is None:
+            mark(local_response_used=True)
+            normalized = self._local_system_file_response(tool_data)
+        elif file_continuation is not None and not self._client_ready(client):
+            mark(local_response_used=True)
+            normalized = self._local_file_continuation_unavailable(file_continuation)
         elif self.should_use_local_tool_response(user_input, tool_data):
             mark(local_response_used=True)
             normalized = self._local_fallback(source, tool_data)
@@ -90,6 +102,10 @@ class Synthesizer:
             except Exception:
                 normalized = {"text": "这次没拿到可靠结果，稍后再试试嘛。",
                               "emotion": "thinking", "action": "talk", "state": "talking"}
+        if file_continuation is not None:
+            content = str(file_continuation.get("content") or "").strip()
+            if content and str(normalized.get("text") or "").strip() == content:
+                normalized = self._local_file_continuation_unavailable(file_continuation)
         # 所有分支经过同一人格与字段归一化出口，保证 UI 数据契约一致。
         normalized["text"] = self.style.preserve(normalized.get("text", ""))
         result = self.style.normalize_fields(normalized, source)
@@ -360,6 +376,201 @@ class Synthesizer:
                 text = "我已经记下相关情况啦。"
         return {"text": text, "emotion": "thinking", "action": "talk", "state": "talking",
                 "source": source}
+
+    @staticmethod
+    def _system_file_result(tool_data: list[dict[str, Any]]) -> dict[str, Any] | None:
+        for item in reversed(tool_data):
+            if item.get("tool") != "system":
+                continue
+            data = item.get("data", {})
+            raw = data.get("raw", {}) if isinstance(data, dict) else {}
+            if not isinstance(raw, dict):
+                continue
+            operation = str(raw.get("operation") or raw.get("action") or "")
+            if operation in {
+                "list_directory", "search_files", "read_text_file", "stat_file",
+                "read_file", "create_text_file", "copy_file", "move_file", "rename_file",
+                "append_file", "replace_exact", "delete_file", "describe_file_access",
+            }:
+                return raw
+        return None
+
+    @classmethod
+    def _file_recovery_response(
+        cls, tool_data: list[dict[str, Any]],
+    ) -> dict[str, str] | None:
+        original_path = ""
+        original_error_code = ""
+        search_raw: dict[str, Any] | None = None
+        recovered_read = False
+        for item in tool_data:
+            if item.get("tool") != "system":
+                continue
+            data = item.get("data") if isinstance(item.get("data"), dict) else {}
+            raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
+            operation = str(raw.get("operation") or "")
+            if (not item.get("ok") and not original_path
+                    and operation in {"read_file", "read_text_file"}
+                    and raw.get("error_code") not in {"USER_CANCELLED", "user_cancelled"}):
+                original_path = str(raw.get("path") or raw.get("resolved_path") or "")
+                original_error_code = str(raw.get("error_code") or "")
+            elif original_path and item.get("ok") and operation == "search_files":
+                search_raw = raw
+            elif original_path and item.get("ok") and operation in {
+                    "read_file", "read_text_file"}:
+                recovered_read = True
+        if not original_path or search_raw is None or recovered_read:
+            return None
+        items = search_raw.get("items") if isinstance(search_raw.get("items"), list) else []
+        candidates = [
+            str(item.get("path") or item.get("name") or "").strip()
+            for item in items if isinstance(item, dict)
+            and str(item.get("path") or item.get("name") or "").strip()
+        ]
+        if candidates:
+            listing = "\n".join(f"- {path}" for path in candidates[:5])
+            text = (
+                f"没有找到 {original_path}。\n\n发现相似文件：\n{listing}"
+                "\n\n是否读取并继续处理这个文件？"
+            )
+        else:
+            suffix = f"（{original_error_code}）" if original_error_code else ""
+            text = (
+                f"这次没有成功读取 {original_path}{suffix}，"
+                "并且在同目录搜索后也没有找到相似文件。"
+            )
+        return {
+            "text": text, "emotion": "thinking", "action": "talk",
+            "state": "talking", "source": "tool",
+        }
+
+    @staticmethod
+    def _file_continuation(tool_data: list[dict[str, Any]]) -> dict[str, Any] | None:
+        supported = {"summary", "analysis", "explain", "extract", "review", "search_related"}
+        for item in tool_data:
+            continuation = item.get("continuation")
+            if (item.get("tool") == "system" and item.get("ok")
+                    and isinstance(continuation, dict)
+                    and continuation.get("type") == "file_content"
+                    and str(continuation.get("next_action") or "") in supported):
+                return continuation
+        return None
+
+    @staticmethod
+    def _local_file_continuation_unavailable(continuation: dict[str, Any]) -> dict[str, str]:
+        labels = {
+            "summary": "总结", "analysis": "分析", "explain": "解释",
+            "extract": "提取", "review": "审查", "search_related": "关联检索整理",
+        }
+        goal = labels.get(str(continuation.get("next_action") or ""), "后续处理")
+        path = str(continuation.get("path") or "这个文件")
+        return {
+            "text": f"我已经成功读取 {path}，但当前推理服务不可用，暂时不能可靠完成{goal}。",
+            "emotion": "thinking", "action": "talk", "state": "talking", "source": "tool",
+        }
+
+    @classmethod
+    def _local_system_file_response(cls, tool_data: list[dict[str, Any]]) -> dict[str, str]:
+        raw = cls._system_file_result(tool_data) or {}
+        operation = str(raw.get("operation") or raw.get("action") or "")
+        if raw.get("ok") is False:
+            message = str(raw.get("message") or raw.get("error") or "没有拿到可用的文件结果").strip()
+            code = str(raw.get("error_code") or "").strip()
+            suffix = f"（{code}）" if code else ""
+            text = f"这次没有成功访问目标位置{suffix}：{message}"
+            return {"text": text, "emotion": "thinking", "action": "talk",
+                    "state": "talking", "source": "tool"}
+        if operation == "describe_file_access":
+            return cls._format_file_access_response(raw)
+        if operation in {"list_directory", "search_files"}:
+            return cls._format_file_listing_response(raw)
+        if operation in {"read_file", "read_text_file"}:
+            content = str(raw.get("content") or "")
+            file_type = str(raw.get("file_type") or "text")
+            path = str(raw.get("path") or raw.get("resolved_path") or "这个文件")
+            text = f"我成功读取了 {path}（{file_type}）。"
+            if content:
+                text += f"\n{content}"
+            return {"text": text, "emotion": "thinking", "action": "talk",
+                    "state": "talking", "source": "tool"}
+        if operation in {
+            "create_text_file", "copy_file", "move_file", "rename_file",
+            "append_file", "replace_exact", "delete_file",
+        }:
+            path = str(raw.get("path") or raw.get("resolved_path") or "目标文件")
+            labels = {
+                "create_text_file": "创建", "copy_file": "复制", "move_file": "移动",
+                "rename_file": "重命名", "append_file": "追加修改",
+                "replace_exact": "精确替换", "delete_file": "移入回收站",
+            }
+            text = f"文件{labels.get(operation, '操作')}已完成：{path}"
+            return {"text": text, "emotion": "thinking", "action": "talk",
+                    "state": "talking", "source": "tool"}
+        text = str(raw.get("message") or "文件操作已经完成。")
+        return {"text": text, "emotion": "thinking", "action": "talk",
+                "state": "talking", "source": "tool"}
+
+    @staticmethod
+    def _format_file_listing_response(raw: dict[str, Any]) -> dict[str, str]:
+        operation = str(raw.get("operation") or "")
+        path = str(raw.get("resolved_path") or raw.get("path") or "").strip()
+        items = raw.get("items") if isinstance(raw.get("items"), list) else []
+        count = raw.get("result_count")
+        try:
+            result_count = int(count)
+        except (TypeError, ValueError):
+            result_count = len(items)
+        if result_count == 0:
+            if operation == "search_files":
+                text = f"我成功查了 {path or '这个目录'}，没有找到匹配的文件。"
+            else:
+                text = f"我成功查看了 {path or '这个目录'}，里面目前没有可列出的项目。"
+            return {"text": text, "emotion": "thinking", "action": "talk",
+                    "state": "talking", "source": "tool"}
+        names = []
+        for item in items[:20]:
+            if isinstance(item, dict):
+                names.append(str(item.get("name") or item.get("path") or "").strip())
+            else:
+                names.append(str(item).strip())
+        names = [name for name in names if name]
+        text = f"我成功查看了 {path or '这个目录'}，找到 {result_count} 项：\n" + "\n".join(
+            f"- {name}" for name in names
+        )
+        if result_count > len(names):
+            text += f"\n还有 {result_count - len(names)} 项没有在这里展开。"
+        return {"text": text, "emotion": "thinking", "action": "talk",
+                "state": "talking", "source": "tool"}
+
+    @staticmethod
+    def _format_file_access_response(raw: dict[str, Any]) -> dict[str, str]:
+        workspaces = raw.get("workspaces") if isinstance(raw.get("workspaces"), list) else []
+        system_dirs = (
+            raw.get("system_directories")
+            if isinstance(raw.get("system_directories"), list) else []
+        )
+        lines = ["我现在能按这些真实权限访问："]
+        for item in workspaces:
+            if not isinstance(item, dict):
+                continue
+            mode = "可写" if item.get("writable") else "只读"
+            name = str(item.get("name") or item.get("workspace_id") or "工作区")
+            root = str(item.get("root") or "")
+            lines.append(f"- {name}：{root}（{mode}）")
+        checks = []
+        for item in system_dirs:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or item.get("id") or "")
+            if item.get("accessible"):
+                mode = "可写" if item.get("mode") == "read_write" else "只读"
+                checks.append(f"{name} {mode}")
+            else:
+                checks.append(f"{name} 不可访问")
+        if checks:
+            lines.append("系统目录检查：" + "；".join(checks) + "。")
+        return {"text": "\n".join(lines), "emotion": "thinking", "action": "talk",
+                "state": "talking", "source": "tool"}
 
     @staticmethod
     def _screen_failure(tool_data: list[dict[str, Any]]) -> bool:

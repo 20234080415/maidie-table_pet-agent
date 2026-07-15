@@ -14,6 +14,11 @@ from core.brain.fast_route import is_coding_agent_request, is_simple_time_query,
 from core.brain.search_query import SearchQueryResolver
 
 
+FILE_CONTINUATION_GOALS = {
+    "none", "summary", "analysis", "explain", "extract", "review", "search_related",
+}
+
+
 class BrainPlanner:
     """Builds deterministic data plans and never produces user-facing prose."""
 
@@ -74,20 +79,66 @@ class BrainPlanner:
         elif task_type == "file":
             allowed = {
                 "list_directory", "stat_file", "search_files", "read_text_file",
-                "create_text_file", "copy_file", "move_file", "rename_file",
+                "read_file", "create_text_file", "copy_file", "move_file", "rename_file",
+                "append_file", "replace_exact", "delete_file",
+                "describe_file_access",
             }
             operation = str(entities.get("operation") or "stat_file")
             operation = operation if operation in allowed else "stat_file"
+            file_goal = str(entities.get("goal") or "none").strip().lower()
+            if file_goal not in FILE_CONTINUATION_GOALS or operation not in {
+                    "read_file", "read_text_file"}:
+                file_goal = "none"
             params = {
                 "operation": operation,
-                "source": str(entities.get("source") or ""),
+                "source": str(entities.get("source") or entities.get("path") or ""),
                 "destination": str(entities.get("destination") or ""),
                 "content": str(entities.get("content") or ""),
+                "pattern": str(entities.get("pattern") or "*"),
+                "limit": int(entities.get("limit") or 50),
+                "old_text": str(entities.get("old_text") or ""),
+                "new_text": str(entities.get("new_text") or ""),
+                "goal": file_goal,
             }
             steps = [self._step("system", operation, params)]
         else:
             return self.plan_for_intent(user_input, str(route.get("intent") or "chat"))
-        return {"goal": str(user_input).strip(), "steps": steps}
+        result = {"goal": str(user_input).strip(), "steps": steps}
+        if task_type == "file":
+            result["task_goal"] = file_goal
+        return result
+
+    @staticmethod
+    def plan_recovery(user_input: str, decision: dict[str, Any]) -> dict[str, Any]:
+        """Convert one validated recovery decision into a bounded single-step plan."""
+        if str(decision.get("tool") or "") != "system":
+            return {"goal": str(user_input).strip(), "steps": [], "recovery": True}
+        operation = str(decision.get("operation") or decision.get("next_action") or "")
+        if operation not in {"search_files", "list_directory", "read_file"}:
+            return {"goal": str(user_input).strip(), "steps": [], "recovery": True}
+        incoming = decision.get("params") if isinstance(decision.get("params"), dict) else {}
+        if operation == "search_files":
+            params = {
+                "operation": operation,
+                "source": str(incoming.get("source") or ""),
+                "pattern": str(incoming.get("pattern") or "*"),
+                "limit": max(1, min(200, int(incoming.get("limit") or 50))),
+            }
+        elif operation == "list_directory":
+            params = {"operation": operation, "source": str(incoming.get("source") or "")}
+        else:
+            goal = str(incoming.get("goal") or "none").strip().lower()
+            params = {
+                "operation": operation,
+                "source": str(incoming.get("source") or ""),
+                "goal": goal if goal in FILE_CONTINUATION_GOALS else "none",
+                "recovery_requires_confirmation": True,
+                "recovery_original_path": str(incoming.get("recovery_original_path") or ""),
+            }
+        return {
+            "goal": str(user_input).strip(), "task_goal": str(incoming.get("goal") or "none"),
+            "steps": [BrainPlanner._step("system", operation, params)], "recovery": True,
+        }
 
     @staticmethod
     def _with_attention(plan: dict[str, Any], attention: dict[str, Any] | None) -> dict[str, Any]:

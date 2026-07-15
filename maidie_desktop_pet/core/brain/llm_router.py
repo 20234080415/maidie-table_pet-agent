@@ -21,7 +21,8 @@ class LLMIntentRouter:
     INTENTS = {"chat", "task", "vision", "clarification", "code_task", "system_task"}
     ENTITY_KEYS = (
         "target_time_text", "time_text", "event", "location", "query",
-        "operation", "source", "destination", "content",
+        "operation", "path", "source", "destination", "content", "pattern", "limit", "goal",
+        "old_text", "new_text",
     )
     PROMPT = ROUTER_PROMPT
 

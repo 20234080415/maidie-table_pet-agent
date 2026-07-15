@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import ctypes
+import difflib
 import errno
 import hashlib
 import json
+import mimetypes
 import os
 import shutil
 import tempfile
 import threading
 import time
+import zipfile
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
+from xml.etree import ElementTree
 
 from core.tools.file_permissions import (
     FileAuthorization,
@@ -24,7 +28,10 @@ from core.tools.file_permissions import (
 
 
 class FileAuditLogger:
-    SENSITIVE_KEYS = {"content", "text", "secret", "token", "password", "api_key", "key"}
+    SENSITIVE_KEYS = {
+        "content", "content_match", "text", "diff", "secret", "token", "password",
+        "api_key", "key",
+    }
 
     def __init__(self, path: str | Path | None = None) -> None:
         self.path = Path(path or (Path.cwd() / "logs" / "file_operations.jsonl"))
@@ -86,10 +93,24 @@ class FileOperationService:
         try:
             source = self._optional(params.get("source"))
             destination = self._optional(params.get("destination"))
-            content = str(params.get("content", ""))
+            content = self._binding_content(operation, params)
             plan = self.policy.build_plan(
                 operation, source=source, destination=destination, content=content,
             )
+            if operation in {"append_file", "replace_exact"}:
+                plan = self.policy.with_diff(plan, self._text_change_diff(plan, params))
+            if operation in {
+                "list_directory", "stat_file", "search_files", "read_text_file", "read_file",
+            } and plan.requires_confirmation:
+                self.audit.record(
+                    operation=operation, result="failed", plan=plan,
+                    error_code="permission_denied",
+                    duration_ms=(time.monotonic() - started) * 1000,
+                )
+                return self._failure(
+                    operation, "permission_denied",
+                    "path is outside configured readable workspaces", plan,
+                )
             if plan.requires_confirmation:
                 approved = bool(self.confirmation_callback and self.confirmation_callback(
                     operation, {"file_plan": plan.preview()},
@@ -100,9 +121,26 @@ class FileOperationService:
                         error_code="user_cancelled",
                         duration_ms=(time.monotonic() - started) * 1000,
                     )
-                    return {"action": operation, "denied": True,
-                            "error": "user confirmation required", "error_code": "user_cancelled",
-                            "plan": plan.preview()}
+                    return self._failure(
+                        operation, "user_cancelled", "用户取消了文件操作", plan, denied=True,
+                    )
+                if operation == "delete_file":
+                    approved_again = bool(
+                        self.confirmation_callback
+                        and self.confirmation_callback(operation, {
+                            "file_plan": {**plan.preview(), "confirmation_stage": 2},
+                        })
+                    )
+                    if not approved_again:
+                        self.audit.record(
+                            operation=operation, result="cancelled", plan=plan,
+                            error_code="user_cancelled",
+                            duration_ms=(time.monotonic() - started) * 1000,
+                        )
+                        return self._failure(
+                            operation, "user_cancelled", "用户取消了第二次删除确认",
+                            plan, denied=True,
+                        )
             authorization = FileAuthorization.issue(plan, now=self.clock())
             authorization.validate(plan, now=self.clock())
             self.policy.revalidate(plan, content=content)
@@ -111,21 +149,30 @@ class FileOperationService:
                 operation=operation, result="success", plan=plan, verification=verification,
                 duration_ms=(time.monotonic() - started) * 1000,
             )
-            return {"action": operation, "plan_id": plan.plan_id,
-                    "risk": plan.risk, "verification": verification}
+            return self._success(operation, plan, verification)
         except Exception as exc:
             code = exc.code if isinstance(exc, FilePermissionError) else self._error_code(exc)
             self.audit.record(
                 operation=operation, result="failed", plan=plan, error_code=code,
                 duration_ms=(time.monotonic() - started) * 1000,
             )
-            return {"action": operation, "error": str(exc), "error_code": code,
-                    "plan": plan.preview() if plan else None}
+            return self._failure(operation, code, str(exc), plan)
 
     @staticmethod
     def _optional(value: Any) -> str | None:
         text = str(value or "").strip()
         return text or None
+
+    @staticmethod
+    def _binding_content(operation: str, params: dict[str, Any]) -> str:
+        if operation in {"create_text_file", "append_file"}:
+            return str(params.get("content", ""))
+        if operation == "replace_exact":
+            return json.dumps({
+                "old_text": str(params.get("old_text", "")),
+                "new_text": str(params.get("new_text", "")),
+            }, ensure_ascii=False, sort_keys=True)
+        return ""
 
     def _perform(self, plan: FileOperationPlan, *, content: str,
                  params: dict[str, Any]) -> dict[str, Any]:
@@ -138,14 +185,18 @@ class FileOperationService:
         if plan.operation == "search_files":
             return self._search_files(source, str(params.get("pattern", "*")),
                                       int(params.get("limit", 50)))
-        if plan.operation == "read_text_file":
-            return self._read_text_file(source, str(params.get("encoding", "utf-8")))
+        if plan.operation in {"read_text_file", "read_file"}:
+            return self._read_file(source, str(params.get("encoding", "utf-8")))
         if plan.operation == "create_text_file":
             return self._create_text_file(destination, content, plan.overwrite)
         if plan.operation == "copy_file":
             return self._copy_file(source, destination, plan.overwrite)
         if plan.operation in {"move_file", "rename_file"}:
             return self._move_file(source, destination, plan.overwrite)
+        if plan.operation in {"append_file", "replace_exact"}:
+            return self._modify_text_file(plan, params)
+        if plan.operation == "delete_file":
+            return self._delete_file(source)
         raise FilePermissionError("unsupported_operation", plan.operation)
 
     def _list_directory(self, source: Path | None) -> dict[str, Any]:
@@ -194,17 +245,186 @@ class FileOperationService:
                         return {"root": str(source), "matches": matches, "truncated": True}
         return {"root": str(source), "matches": matches, "truncated": False}
 
-    @staticmethod
-    def _read_text_file(source: Path | None, encoding: str) -> dict[str, Any]:
+    def _read_file(self, source: Path | None, encoding: str) -> dict[str, Any]:
         assert source is not None
         size = source.stat().st_size
         if size > 2_000_000:
             raise FilePermissionError("file_too_large", "file exceeds 2 MB read limit")
+        file_type, extension, mime = self._detect_file_type(source)
+        if file_type == "docx":
+            return self._read_docx(source, extension, mime)
+        if file_type == "pdf":
+            return self._read_pdf(source, extension, mime)
         data = source.read_bytes()
         if b"\x00" in data[:8192]:
             raise FilePermissionError("binary_file", "binary files cannot be read as text")
-        return {"path": str(source), "content": data.decode(encoding, errors="replace"),
-                "size": size, "sha256": FilePermissionPolicy.sha256(source)}
+        try:
+            content = data.decode(encoding)
+        except UnicodeDecodeError as exc:
+            raise FilePermissionError("binary_file", "file is not valid text") from exc
+        metadata = {
+            "size": size, "extension": extension, "mime": mime,
+            "sha256": FilePermissionPolicy.sha256(source),
+        }
+        return {
+            "path": str(source), "file_type": file_type, "content": content,
+            "metadata": metadata, "size": size, "sha256": metadata["sha256"],
+        }
+
+    @staticmethod
+    def _detect_file_type(source: Path) -> tuple[str, str, str]:
+        extension = source.suffix.lower().lstrip(".")
+        guessed_mime = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+        header = source.read_bytes()[:8192]
+        if header.startswith(b"%PDF-"):
+            return "pdf", extension, "application/pdf"
+        if header.startswith(b"PK"):
+            try:
+                with zipfile.ZipFile(source) as archive:
+                    names = set(archive.namelist())
+                    if "word/document.xml" in names and "[Content_Types].xml" in names:
+                        return "docx", extension, (
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
+            except (OSError, zipfile.BadZipFile):
+                pass
+        if b"\x00" in header:
+            return "binary", extension, guessed_mime
+        if extension in {"md", "markdown"}:
+            return "markdown", extension, "text/markdown"
+        if extension == "json":
+            return "json", extension, "application/json"
+        if extension in {"yaml", "yml"}:
+            return "yaml", extension, "application/yaml"
+        if extension in {
+            "py", "pyi", "js", "ts", "tsx", "jsx", "java", "c", "h", "cpp", "hpp",
+            "cs", "go", "rs", "rb", "php", "sh", "ps1", "html", "css", "xml", "toml",
+        }:
+            return "code", extension, guessed_mime
+        return "text", extension, guessed_mime if guessed_mime.startswith("text/") else "text/plain"
+
+    @staticmethod
+    def _read_docx(source: Path, extension: str, mime: str) -> dict[str, Any]:
+        namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        try:
+            with zipfile.ZipFile(source) as archive:
+                total_uncompressed = sum(item.file_size for item in archive.infolist())
+                if total_uncompressed > 20_000_000:
+                    raise FilePermissionError("document_too_large", "DOCX expanded content is too large")
+                root = ElementTree.fromstring(archive.read("word/document.xml"))
+        except (KeyError, zipfile.BadZipFile, ElementTree.ParseError) as exc:
+            raise FilePermissionError("invalid_docx", "DOCX structure is invalid") from exc
+        blocks: list[dict[str, Any]] = []
+        rendered: list[str] = []
+        for paragraph in root.findall(".//w:body/w:p", namespace):
+            text = "".join(node.text or "" for node in paragraph.findall(".//w:t", namespace)).strip()
+            if not text:
+                continue
+            style_node = paragraph.find("./w:pPr/w:pStyle", namespace)
+            style = style_node.get(f"{{{namespace['w']}}}val", "") if style_node is not None else ""
+            level = None
+            if style.lower().startswith("heading"):
+                suffix = style[len("Heading"):]
+                level = int(suffix) if suffix.isdigit() else 1
+                level = max(1, min(6, level))
+            blocks.append({"type": "heading" if level else "paragraph", "level": level, "text": text})
+            rendered.append(f"{'#' * level} {text}" if level else text)
+        metadata = {
+            "size": source.stat().st_size, "extension": extension, "mime": mime,
+            "paragraphs": len(blocks), "sha256": FilePermissionPolicy.sha256(source),
+        }
+        return {"path": str(source), "file_type": "docx", "content": "\n\n".join(rendered),
+                "blocks": blocks, "metadata": metadata}
+
+    @staticmethod
+    def _read_pdf(source: Path, extension: str, mime: str) -> dict[str, Any]:
+        try:
+            from pypdf import PdfReader
+        except ImportError as exc:
+            raise FilePermissionError("pdf_reader_unavailable", "PDF reader dependency is unavailable") from exc
+        try:
+            reader = PdfReader(str(source))
+            if reader.is_encrypted:
+                raise FilePermissionError("encrypted_pdf", "encrypted PDF files are not supported")
+            pages = []
+            for index, page in enumerate(reader.pages, 1):
+                pages.append({"page": index, "text": str(page.extract_text() or "").strip()})
+        except FilePermissionError:
+            raise
+        except Exception as exc:
+            raise FilePermissionError("invalid_pdf", "PDF structure could not be read") from exc
+        content = "\n\n".join(
+            f"[Page {page['page']}]\n{page['text']}" for page in pages if page["text"]
+        )
+        if not content.strip():
+            raise FilePermissionError(
+                "scanned_pdf_no_text", "扫描型 PDF 没有可提取文本，当前未启用 OCR",
+            )
+        metadata = {
+            "size": source.stat().st_size, "extension": extension, "mime": mime,
+            "pages": len(pages), "sha256": FilePermissionPolicy.sha256(source),
+        }
+        return {"path": str(source), "file_type": "pdf", "content": content,
+                "pages": pages, "metadata": metadata}
+
+    def _text_change_diff(self, plan: FileOperationPlan, params: dict[str, Any]) -> str:
+        source = Path(str(plan.resolved_source))
+        old_content, new_content = self._build_text_change(source, plan.operation, params)
+        lines = difflib.unified_diff(
+            old_content.splitlines(), new_content.splitlines(),
+            fromfile=str(source), tofile=str(source), lineterm="",
+        )
+        return "\n".join(lines)
+
+    def _modify_text_file(self, plan: FileOperationPlan, params: dict[str, Any]) -> dict[str, Any]:
+        source = Path(str(plan.resolved_source))
+        _old_content, new_content = self._build_text_change(source, plan.operation, params)
+        data = new_content.encode("utf-8")
+        if len(data) > 2_000_000:
+            raise FilePermissionError("content_too_large", "content exceeds 2 MB write limit")
+        self._atomic_replace_bytes(source, data)
+        digest = FilePermissionPolicy.sha256(source)
+        expected = hashlib.sha256(data).hexdigest()
+        if not source.exists() or source.stat().st_size != len(data) or digest != expected:
+            raise FilePermissionError("verification_failed", "modified file verification failed")
+        return {"path": str(source), "exists": True, "size": len(data), "sha256": digest,
+                "content_match": True, "diff": plan.diff}
+
+    @staticmethod
+    def _build_text_change(source: Path, operation: str,
+                           params: dict[str, Any]) -> tuple[str, str]:
+        data = source.read_bytes()
+        if len(data) > 2_000_000:
+            raise FilePermissionError("file_too_large", "file exceeds 2 MB modification limit")
+        if b"\x00" in data[:8192]:
+            raise FilePermissionError("binary_file", "binary files cannot be modified as text")
+        try:
+            old_content = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise FilePermissionError("binary_file", "file is not valid UTF-8 text") from exc
+        if operation == "append_file":
+            addition = str(params.get("content", ""))
+            if not addition:
+                raise FilePermissionError("content_required", "append content is required")
+            return old_content, old_content + addition
+        old_text = str(params.get("old_text", ""))
+        new_text = str(params.get("new_text", ""))
+        if not old_text:
+            raise FilePermissionError("old_text_required", "old_text is required")
+        matches = old_content.count(old_text)
+        if matches == 0:
+            raise FilePermissionError("match_not_found", "exact text was not found")
+        if matches > 1:
+            raise FilePermissionError("multiple_matches", "exact text matched more than once")
+        return old_content, old_content.replace(old_text, new_text, 1)
+
+    def _delete_file(self, source: Path | None) -> dict[str, Any]:
+        assert source is not None
+        self._recycle_path(source)
+        if source.exists():
+            raise FilePermissionError("verification_failed", "deleted file still exists")
+        return {"path": str(source), "deleted": True, "exists": False,
+                "recycle_bin": True, "source_missing": True}
 
     def _create_text_file(self, destination: Path | None, content: str,
                           overwrite: bool) -> dict[str, Any]:
@@ -413,3 +633,73 @@ class FileOperationService:
         if isinstance(exc, FileNotFoundError):
             return "path_not_found"
         return "file_operation_failed"
+
+    @staticmethod
+    def _success(operation: str, plan: FileOperationPlan,
+                 verification: dict[str, Any]) -> dict[str, Any]:
+        workspace = plan.workspace_names[0] if plan.workspace_names else None
+        resolved_path = plan.resolved_source or plan.resolved_destination
+        payload: dict[str, Any] = {
+            "ok": True,
+            "operation": operation,
+            "action": operation,
+            "plan_id": plan.plan_id,
+            "risk": plan.risk,
+            "resolved_path": resolved_path,
+            "path": resolved_path,
+            "workspace_id": workspace,
+            "verification": verification,
+            "result": verification,
+            "error_code": None,
+            "message": "",
+        }
+        if operation == "list_directory":
+            items = list(verification.get("entries", []))
+            payload.update({
+                "items": items,
+                "result_count": int(verification.get("count", len(items))),
+                "truncated": bool(verification.get("truncated", False)),
+                "data": {"items": items},
+            })
+        elif operation == "search_files":
+            items = [
+                {"name": Path(str(match)).name, "path": str(match), "type": "file"}
+                for match in verification.get("matches", [])
+            ]
+            payload.update({
+                "items": items,
+                "result_count": len(items),
+                "truncated": bool(verification.get("truncated", False)),
+                "data": {"items": items},
+            })
+        else:
+            payload.update({"result_count": None, "items": None, "data": verification})
+        for key in ("file_type", "content", "metadata", "pages", "blocks", "diff"):
+            if key in verification:
+                payload[key] = verification[key]
+        return payload
+
+    @staticmethod
+    def _failure(operation: str, code: str, message: str,
+                 plan: FileOperationPlan | None, *, denied: bool = False) -> dict[str, Any]:
+        error_code = code if code.isupper() else code
+        resolved_path = (
+            (plan.resolved_source or plan.resolved_destination) if plan else None
+        )
+        return {
+            "ok": False,
+            "operation": operation,
+            "action": operation,
+            "error": message,
+            "error_code": error_code,
+            "message": message,
+            "data": None,
+            "result": None,
+            "resolved_path": resolved_path,
+            "path": resolved_path,
+            "workspace_id": plan.workspace_names[0] if plan and plan.workspace_names else None,
+            "result_count": None,
+            "items": None,
+            "plan": plan.preview() if plan else None,
+            "denied": denied,
+        }

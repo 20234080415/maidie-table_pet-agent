@@ -30,6 +30,15 @@ class FileClient:
         }
 
 
+class FilePathClient:
+    def route_intent(self, prompt, context):
+        return {
+            "intent": "system_task", "task_type": "file", "needs_tools": True,
+            "entities": {"operation": "read_file", "path": "桌面/test.txt"},
+            "confidence": 0.95, "reason": "named file read",
+        }
+
+
 class LLMRouterScenarioTests(unittest.TestCase):
     def setUp(self):
         self.router = LLMIntentRouter(StubClient())
@@ -113,6 +122,15 @@ class LLMRouterScenarioTests(unittest.TestCase):
         self.assertEqual(route["entities"]["destination"], "b.txt")
         self.assertNotIn("risk", route["entities"])
         self.assertNotIn("confirmed", route["entities"])
+
+    def test_file_path_survives_normalization_and_planner_uses_it_as_source(self):
+        route = LLMIntentRouter(FilePathClient()).route("请处理指定文件")
+
+        self.assertEqual(route["entities"]["path"], "桌面/test.txt")
+        from core.brain.planner import BrainPlanner
+        step = BrainPlanner().plan_route("请处理指定文件", route)["steps"][0]
+        self.assertEqual(step["action"], "read_file")
+        self.assertEqual(step["params"]["source"], "桌面/test.txt")
 
     def test_session_context_is_reused_without_external_history(self):
         self.router.route("我5.40下课")

@@ -38,7 +38,57 @@ class BrainPlannerRouteTests(unittest.TestCase):
         })
 
         self.assertEqual(step["tool"], "system")
-        self.assertEqual(set(step["params"]), {"operation", "source", "destination", "content"})
+        self.assertEqual(set(step["params"]), {
+            "operation", "source", "destination", "content", "pattern", "limit",
+            "old_text", "new_text", "goal",
+        })
+        self.assertEqual(step["params"]["pattern"], "*")
+        self.assertEqual(step["params"]["limit"], 50)
+
+    def test_file_mutation_plan_preserves_only_supported_change_fields(self):
+        step = self.step("file", {
+            "operation": "replace_exact", "source": "config.txt",
+            "old_text": "timeout=30", "new_text": "timeout=60",
+            "patch": "forged", "confirmed": True, "risk": "low",
+        })
+
+        self.assertEqual(step["action"], "replace_exact")
+        self.assertEqual(step["params"]["old_text"], "timeout=30")
+        self.assertEqual(step["params"]["new_text"], "timeout=60")
+        self.assertNotIn("confirmed", step["params"])
+        self.assertNotIn("risk", step["params"])
+
+    def test_file_read_plan_preserves_supported_continuation_goal(self):
+        step = self.step("file", {
+            "operation": "read_file", "path": "test.txt", "goal": "summary",
+        })
+
+        self.assertEqual(step["action"], "read_file")
+        self.assertEqual(step["params"]["goal"], "summary")
+
+    def test_file_plan_rejects_unknown_continuation_goal(self):
+        step = self.step("file", {
+            "operation": "read_file", "path": "test.txt", "goal": "execute_script",
+        })
+
+        self.assertEqual(step["params"]["goal"], "none")
+
+    def test_recovery_plan_allows_only_bounded_file_recovery_actions(self):
+        planner = BrainPlanner()
+        search = planner.plan_recovery("find file", {
+            "tool": "system", "operation": "search_files",
+            "params": {"source": "桌面", "pattern": "秘籍.*", "limit": 50,
+                       "confirmed": True, "risk": "low"},
+        })
+        blocked = planner.plan_recovery("unsafe", {
+            "tool": "system", "operation": "delete_file",
+            "params": {"source": "桌面/a.txt"},
+        })
+
+        self.assertEqual(search["steps"][0]["action"], "search_files")
+        self.assertNotIn("confirmed", search["steps"][0]["params"])
+        self.assertNotIn("risk", search["steps"][0]["params"])
+        self.assertEqual(blocked["steps"], [])
 
 
 if __name__ == "__main__": unittest.main()

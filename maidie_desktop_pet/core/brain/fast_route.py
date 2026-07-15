@@ -33,6 +33,46 @@ TECHNICAL = re.compile(r"代码|编译|linux|cmake|cmakelists\.txt|makefile|pyth
 EXPLANATION = re.compile(r"是什么意思|怎么用|有什么作用|解释", re.I)
 GREETING = re.compile(r"^(?:你好|嗨|hello|hi|嗯|好的)[！!。.？?\s]*$", re.I)
 SEARCH = re.compile(r"搜索|搜|继续查|帮我查|查一下|查询|search|look up", re.I)
+FILE_ACCESS_QUERY = re.compile(
+    r"(?:你现在|当前|现在).*(?:能看|能访问|可以看|可访问).*(?:文件夹|目录)|"
+    r"(?:which|what).*(?:folders|directories).*(?:access|see)",
+    re.I,
+)
+FILE_DIRECTORY_QUERY = re.compile(
+    r"(?:查看|看看|列出|显示|有哪些|有什么|list|show).*(?:桌面|desktop|文档|documents?|下载|downloads?|图片|pictures?|音乐|music|视频|videos?|用户目录|home)",
+    re.I,
+)
+FILE_READ_QUERY = re.compile(
+    r"读取|打开|查看|看看|分析|总结|文件内容|\b(?:read|open|view|analy[sz]e|summari[sz]e)\b",
+    re.I,
+)
+FILE_SEARCH_QUERY = re.compile(r"找一下|查找|搜索|搜一下|有没有|\b(?:find|search)\b", re.I)
+FILE_LIST_QUERY = re.compile(
+    r"有哪些文件|有什么文件|列出.*(?:文件|目录)|显示.*(?:文件|目录)|"
+    r"(?:查看|看看).*(?:目录|有哪些|有什么)|\b(?:list|show).*(?:files?|director(?:y|ies))\b",
+    re.I,
+)
+DIRECTORY_ALIASES = (
+    ("documents", "documents"), ("document", "documents"),
+    ("downloads", "downloads"), ("download", "downloads"),
+    ("pictures", "pictures"), ("picture", "pictures"),
+    ("desktop", "desktop"), ("videos", "videos"), ("video", "videos"),
+    ("桌面", "桌面"), ("文档", "文档"), ("下载", "下载"),
+    ("图片", "图片"), ("音乐", "音乐"), ("music", "music"),
+    ("视频", "视频"), ("用户目录", "用户目录"), ("home", "home"),
+)
+FILE_NAME_AT_START = re.compile(
+    r"^(?:文件)?(?P<name>[^\\/:*?\"<>|，。！？、]+?\.[A-Za-z0-9]{1,12})"
+    r"(?=$|[\s，。！？、]|总结|分析|内容|一下|并|请)",
+    re.I,
+)
+BARE_FILE_REQUEST = re.compile(
+    r"(?:读取|打开|查看|看看|分析|总结|解释|说明|提取|抽取|审查|评审)"
+    r"\s*(?:一下)?\s*(?:这个|该)?\s*(?:文件)?\s*"
+    r"(?P<name>[^\\/:*?\"<>|，。！？、\s]+?\.[A-Za-z0-9]{1,12})"
+    r"(?=$|[\s，。！？、]|总结|分析|解释|说明|提取|审查|一下|并)",
+    re.I,
+)
 COMPLEX_WEATHER = re.compile(r"适合|穿什么|安排|出去玩|建议|推荐|应该", re.I)
 PROJECT_CODING_REQUEST = re.compile(
     r"分析(?:一下|下|看看)?(?:我(?:的)?|当前|这个)?(?:这个)?项目|"
@@ -87,6 +127,9 @@ def fast_route(text: str) -> dict[str, Any] | None:
     if is_coding_agent_request(value):
         return _route("code_task", "explicit local coding agent request",
                       task_type="code_task", needs_tools=True)
+    file_route = _file_route(value)
+    if file_route is not None:
+        return file_route
     if TECHNICAL.search(value) and not re.search(r"屏幕|当前窗口|打开的软件", value) and (
             EXPLANATION.search(value) or re.search(r"怎么修|为什么不执行|怎么重构|帮我看看", value)):
         return _route("code_task", "technical task", task_type="code_task")
@@ -120,6 +163,105 @@ def fast_route(text: str) -> dict[str, Any] | None:
     if GREETING.fullmatch(value):
         return _route("chat", "short greeting")
     return None
+
+
+def _file_route(value: str) -> dict[str, Any] | None:
+    if FILE_ACCESS_QUERY.search(value):
+        return _route("system_task", "deterministic file access query",
+                      task_type="file", needs_tools=True,
+                      entities={"operation": "describe_file_access"})
+    directory_match = _directory_alias_match(value)
+    source = directory_match[1] if directory_match else ""
+    goal = _file_goal_from_text(value)
+    if not source:
+        bare_filename = _bare_filename_from_text(value)
+        if bare_filename and FILE_READ_QUERY.search(value):
+            return _route("system_task", "deterministic named file read",
+                          task_type="file", needs_tools=True,
+                          entities={"operation": "read_file", "path": bare_filename,
+                                    "goal": goal})
+        return None
+    filename = _filename_after_directory(value, directory_match)
+    if FILE_SEARCH_QUERY.search(value):
+        pattern = filename or _file_pattern_from_text(value)
+        return _route("system_task", "deterministic file search query",
+                      task_type="file", needs_tools=True,
+                      entities={"operation": "search_files", "path": source, "source": source,
+                                "pattern": pattern})
+    if filename and FILE_READ_QUERY.search(value):
+        path = f"{source}/{filename}"
+        return _route("system_task", "deterministic named file read",
+                      task_type="file", needs_tools=True,
+                      entities={"operation": "read_file", "path": path, "goal": goal})
+    if not (FILE_LIST_QUERY.search(value) or FILE_DIRECTORY_QUERY.search(value)):
+        return None
+    pattern = _file_pattern_from_text(value)
+    operation = "search_files" if pattern != "*" else "list_directory"
+    return _route("system_task", "deterministic file directory query",
+                  task_type="file", needs_tools=True,
+                  entities={"operation": operation, "path": source, "source": source,
+                            "pattern": pattern})
+
+
+def _directory_alias_from_text(value: str) -> str:
+    match = _directory_alias_match(value)
+    return match[1] if match else ""
+
+
+def _directory_alias_match(value: str) -> tuple[str, str, int] | None:
+    lowered = value.lower()
+    matches = []
+    for needle, alias in DIRECTORY_ALIASES:
+        index = lowered.find(needle)
+        if index >= 0:
+            matches.append((index, -len(needle), needle, alias))
+    if not matches:
+        return None
+    index, _negative_length, needle, alias = min(matches)
+    return needle, alias, index + len(needle)
+
+
+def _filename_after_directory(
+        value: str, directory_match: tuple[str, str, int] | None) -> str:
+    if directory_match is None:
+        return ""
+    tail = value[directory_match[2]:]
+    tail = re.sub(
+        r"^\s*(?:目录)?(?:上|下|里|中)?的?\s*(?:所有|全部)?\s*[\\/]*\s*",
+        "", tail, flags=re.I,
+    )
+    match = FILE_NAME_AT_START.match(tail)
+    return str(match.group("name")).strip() if match else ""
+
+
+def _bare_filename_from_text(value: str) -> str:
+    match = BARE_FILE_REQUEST.search(value)
+    return str(match.group("name")).strip() if match else ""
+
+
+def _file_goal_from_text(value: str) -> str:
+    checks = (
+        (r"搜索.*相关|查找.*相关|相关资料|相关信息|延伸搜索|search related", "search_related"),
+        (r"总结|概括|摘要|summari[sz]e", "summary"),
+        (r"分析|有什么问题|存在哪些问题|analy[sz]e", "analysis"),
+        (r"解释|说明|什么意思|explain", "explain"),
+        (r"提取|抽取|extract", "extract"),
+        (r"审查|评审|检查|review", "review"),
+    )
+    return next((goal for pattern, goal in checks if re.search(pattern, value, re.I)), "none")
+
+
+def _file_pattern_from_text(value: str) -> str:
+    match = re.search(r"\.([A-Za-z0-9]{1,12})\b", value)
+    if match:
+        return f"*.{match.group(1)}"
+    for needle, extension in (
+        ("md", "md"), ("markdown", "md"), ("txt", "txt"), ("pdf", "pdf"),
+        ("docx", "docx"), ("xlsx", "xlsx"), ("png", "png"), ("jpg", "jpg"),
+    ):
+        if re.search(rf"(?<![A-Za-z0-9]){needle}(?![A-Za-z0-9])", value, re.I):
+            return f"*.{extension}"
+    return "*"
 
 
 def _route(intent: str, reason: str, *, task_type: str = "none", needs_tools: bool = False,

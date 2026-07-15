@@ -31,8 +31,21 @@ def build_synthesizer_prompt(
         "只依据下方工具数据回答，不得补全或猜测事实；数据报错或不足就可爱地说暂时没查到。"
         if source != "chat" else "这是纯桌宠聊天，不得声称读取了任何设备或外部事实。"
     )
+    file_rules = (
+        "\nFile tool rules: if system/file tool data has ok=false, say access failed clearly. "
+        "Do not describe directory contents or say no matching files were found. "
+        "Only say no matching files were found when ok=true and result_count=0/items=[]. "
+        "File lists must come from structured items, result_count, resolved_path, and workspace_id. "
+        "When an execution contains continuation.type=file_content, follow next_action using only its "
+        "content and the original user request. Do not return the full source content as the answer. "
+        "For summary, provide a concise summary and key points. For analysis, identify the topic, main "
+        "issues or observations, and actionable suggestions. For explain, explain the content clearly. "
+        "For extract, return only the requested facts or fields. For review, give findings and improvements. "
+        "For search_related, identify related topics or queries; do not claim external search occurred unless "
+        "search tool data is also present. If the file operation failed, never continue the reasoning task."
+    )
     return (
-        f"{personality_prompt}\n{task}\n"
+        f"{personality_prompt}\n{task}{file_rules}\n"
         "你是唯一输出层。隐藏所有内部步骤，只返回 JSON，字段严格为 text、emotion、action、state。"
         "emotion 仅限 idle|happy|thinking|shy；action 仅限 talk|react|think；"
         "state 仅限 talking|idle|thinking。\n"

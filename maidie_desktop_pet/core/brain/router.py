@@ -15,6 +15,7 @@ from core.brain.executor import BrainExecutor
 from core.brain.intent_classifier import IntentClassifier
 from core.brain.llm_router import LLMIntentRouter
 from core.brain.planner import BrainPlanner
+from core.brain.recovery import ToolRecoveryAnalyzer
 from core.brain.synthesizer import Synthesizer
 from core.session.output_events import OutputMode
 from core.performance import mark
@@ -40,17 +41,21 @@ class BrainRouter:
     )
     VISION_CLEAR = re.compile(r"^(?:不用看了|清除上下文)[？?！!。.\s]*$", re.I)
     VISION_CONFIRM = re.compile(r"^(?:嗯|对|是|看一下|你看|可以)[？?！!。.\s]*$", re.I)
+    MAX_AGENT_ITERATIONS = 3
+
     def __init__(self, chat_client: Any, codex_client: Any, tool_registry: Any, memory: Any,
                  classifier: IntentClassifier | None = None, planner: BrainPlanner | None = None,
                  synthesizer: Synthesizer | None = None,
                  intent_router: LLMIntentRouter | None = None,
-                 executor: BrainExecutor | None = None) -> None:
+                 executor: BrainExecutor | None = None,
+                 recovery_analyzer: Any | None = None) -> None:
         self.chat_client, self.codex_client = chat_client, codex_client
         self.memory = memory
         self.classifier = classifier or IntentClassifier()
         self.intent_router = intent_router or LLMIntentRouter(chat_client, self.classifier)
         self.planner = planner or BrainPlanner()
         self.executor = executor or BrainExecutor(tool_registry)
+        self.recovery_analyzer = recovery_analyzer or ToolRecoveryAnalyzer(chat_client)
         self.synthesizer = synthesizer or Synthesizer(chat_client, codex_client)
         self._vision_clarification_pending = False
         self._vision_clarification_created_at = 0.0
@@ -171,9 +176,8 @@ class BrainRouter:
             finally:
                 mark(plan_duration_ms=round((monotonic() - started) * 1000, 3))
             # Executor 返回结构化事实，并在 Tool 边界重新验证 Planner 参数。
-            executions = (
-                self.executor.execute(plan, user_input, on_event=on_delta)
-                if on_delta else self.executor.execute(plan, user_input)
+            executions = self._execute_with_recovery(
+                plan, user_input, context, on_delta,
             )
             source = self._source_for_intent(intent)
             started = monotonic()
@@ -214,6 +218,47 @@ class BrainRouter:
         finally:
             mark(synthesize_duration_ms=round((monotonic() - started) * 1000, 3))
         return result
+
+    def _execute_with_recovery(
+        self, plan: dict[str, Any], user_input: str,
+        context: list[dict[str, Any]],
+        on_delta: Callable[[str], None] | None,
+    ) -> list[dict[str, Any]]:
+        """Execute, observe and replan with a strict per-request round limit."""
+        executions: list[dict[str, Any]] = []
+        current_plan = plan
+        for iteration in range(self.MAX_AGENT_ITERATIONS):
+            batch = (
+                self.executor.execute(current_plan, user_input, on_event=on_delta)
+                if on_delta else self.executor.execute(current_plan, user_input)
+            )
+            if not executions:
+                executions = batch
+                for index, execution in enumerate(executions):
+                    execution["index"] = index
+            else:
+                for execution in batch:
+                    execution["index"] = len(executions)
+                    executions.append(execution)
+            if not batch or iteration + 1 >= self.MAX_AGENT_ITERATIONS:
+                break
+            decision = self.recovery_analyzer.decide(
+                user_input, plan, executions, iteration + 1, context,
+            )
+            if decision.get("finished", True):
+                break
+            current_plan = self.planner.plan_recovery(user_input, decision)
+            if not current_plan.get("steps"):
+                break
+            progress = str(decision.get("progress") or "").strip()
+            if progress and on_delta is not None:
+                on_delta({
+                    "type": "progress", "mode": "TASK_PROGRESS",
+                    "content": progress, "source": "tool",
+                    "tool": str(decision.get("tool") or ""),
+                    "phase": "recovering",
+                })
+        return executions
 
     def _vision_session(self) -> Any:
         service = self._vision_service()
