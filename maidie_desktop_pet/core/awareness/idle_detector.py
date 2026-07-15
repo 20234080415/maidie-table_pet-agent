@@ -1,3 +1,9 @@
+"""根据最后活动时间计算用户空闲状态。
+
+MouseTracker 等输入源调用 ``mark_activity``，Experience/Proactive 层读取 ``state``；
+模块只维护时间状态，不自行注册全局输入钩子或触发主动对话。
+"""
+
 from __future__ import annotations
 
 from time import monotonic

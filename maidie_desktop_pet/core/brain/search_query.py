@@ -1,3 +1,9 @@
+"""解析 Search Tool 的显式查询及受控上下文来源。
+
+该模块在 Planner 阶段区分用户输入、短期上下文和最近剪贴板候选，避免把空查询或
+未经确认的环境内容静默发送到网络 Tool。
+"""
+
 from __future__ import annotations
 
 import re
@@ -7,6 +13,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ResolvedSearchQuery:
+    """Search 查询及其来源、置信度和确认需求的不可变描述。"""
     query: str
     source: str
 

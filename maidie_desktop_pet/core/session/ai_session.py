@@ -1,3 +1,9 @@
+"""管理 AI 请求从提交、后台执行到流式展示的完整生命周期。
+
+``AISessionCoordinator`` 位于 ``PetController`` 与 ``BrainRouter`` 之间，使用外部
+Executor 提交耗时工作，再通过 Qt signal/QTimer 把结果安全送回主线程并驱动 ChatStreamer。
+"""
+
 from __future__ import annotations
 
 import logging
@@ -14,7 +20,12 @@ from core.session.thinking_feedback import ThinkingFeedbackPool
 
 
 class AISessionCoordinator(QObject):
-    """Owns one AI request and its paced streaming lifecycle."""
+    """拥有当前 AI 请求及其节奏化输出状态。
+
+    实例通常与 ``PetController`` 同生命周期，但同一时刻只接受一个活动请求。
+    generation/request_id 隔离取消前后的回调，sequence 保证 OutputEvent 顺序；后台
+    Future 不直接操作 QWidget，而是经 Qt signal 和轮询回到主线程。
+    """
 
     _stream_delta_ready = pyqtSignal(object)
 
@@ -69,6 +80,11 @@ class AISessionCoordinator(QObject):
         self._stream_delta_ready.connect(self._accept_stream_delta)
 
     def submit(self, message: str, proactive: bool = False) -> bool:
+        """启动一次请求；已关闭、空输入或 busy 时返回 ``False``。
+
+        入口先建立 request 身份和 UI 流状态，再把 Brain 调用提交给后台 Executor；
+        提交异常会回滚 busy 状态，避免 Session 永久卡住。
+        """
         if self._shutting_down:
             return False
         message = message.strip()
@@ -85,6 +101,7 @@ class AISessionCoordinator(QObject):
         self._task_stream_received = False
         self._task_request_started = False
         self._current_tool = ""
+        # 同时捕获 generation 与 request_id，后续可拒绝取消前排队的回调。
         generation = self._request_generation
         request_id = self.request_id
         submitted_at = monotonic()
@@ -161,6 +178,11 @@ class AISessionCoordinator(QObject):
     def accept_output_event(
         self, payload: dict[str, Any], *, request_id: str, generation: int,
     ) -> bool:
+        """校验并转发当前请求的结构化输出事件。
+
+        旧 generation 或错误 request_id 的事件会被丢弃，防止取消或快速重提后，
+        后台迟到结果污染新的气泡和进度状态；返回值表示事件是否被当前 Session 接受。
+        """
         if self._shutting_down:
             return False
         if generation != self._request_generation or request_id != self.request_id:
@@ -230,6 +252,7 @@ class AISessionCoordinator(QObject):
         self.streamer.finish()
 
     def complete_stream_response(self) -> None:
+        """提交 complete 事件并原子清理当前请求的 Session 状态。"""
         response = self.pending_response
         if response is None:
             return
@@ -286,6 +309,7 @@ class AISessionCoordinator(QObject):
         self._current_tool = ""
 
     def shutdown(self) -> None:
+        """停止接受新请求，并使所有在途回调失效。"""
         if self._shutting_down:
             return
         self._shutting_down = True

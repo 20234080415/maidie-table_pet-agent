@@ -1,3 +1,9 @@
+"""从用户显式措辞解析 Vision capture scope。
+
+BrainRouter 使用这些规则区分活动窗口、全屏、鼠标附近和框选区域；规则只描述范围，
+不执行截图，模糊请求仍由 Router 的澄清流程处理。
+"""
+
 from __future__ import annotations
 
 import re
@@ -5,6 +11,7 @@ from enum import Enum
 
 
 class VisionScope(str, Enum):
+    """ScreenCapture 支持的显式截图范围。"""
     ACTIVE_WINDOW = "active_window"
     FULLSCREEN = "fullscreen"
     CURSOR_REGION = "cursor_region"
@@ -52,11 +59,13 @@ def is_cursor_region_request(text: str) -> bool:
 
 
 def vision_scope_for(text: str, default: str = "active_window") -> str:
+    """兼容旧调用方，返回检测到的 scope 字符串。"""
     return detect_vision_scope(text, default).value
 
 
 def detect_vision_scope(user_text: str,
                         default_scope: str = "active_window") -> VisionScope:
+    """按显式优先级解析 scope，未指明时使用经校验的默认值。"""
     value = str(user_text).strip()
     if _SELECTED_REGION.search(value):
         return VisionScope.SELECTED_REGION
@@ -74,6 +83,7 @@ def detect_vision_scope(user_text: str,
 
 
 def is_explicit_scope_request(text: str) -> bool:
+    """判断请求是否足以跳过 Vision scope 澄清。"""
     value = str(text).strip()
     return bool(
         _SELECTED_REGION.search(value)

@@ -1,3 +1,9 @@
+"""持久化并按应用 tick 触发本地计划任务。
+
+``TaskScheduler`` 管理任务记录和到期判断，把触发结果交给上层处理；它不直接调用 Brain
+或修改 UI，从而让 Session 决定任务如何进入用户交互流程。
+"""
+
 from __future__ import annotations
 
 import json
@@ -10,6 +16,7 @@ from typing import Any, Callable
 
 @dataclass
 class ScheduledTask:
+    """一个可持久化的计划任务记录及其触发状态。"""
     id: str
     type: str
     trigger: Any
@@ -50,6 +57,11 @@ class TaskScheduler:
         return len(self.tasks) != before
 
     def tick(self, context: dict[str, Any] | None = None, now: datetime | None = None) -> list[ScheduledTask]:
+        """计算本次 tick 到期任务，并持久化触发/禁用状态。
+
+        返回值只描述到期项，实际提醒或 Tool 调用由 ProactiveRuntime/PetController 执行；
+        注入 ``now`` 使 cron、once 和条件冷却可确定测试。
+        """
         current, context = now or self._now(), context or {}
         due = []
         for task in self.tasks:

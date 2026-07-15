@@ -1,3 +1,9 @@
+"""封装 Qwen VL 请求、配置校验和结构化响应解析。
+
+``VisionService`` 传入已预处理的 image data URL 与问题，本 client 只负责 provider 协议
+并返回 ``VisionContext``；网络、配置和解析失败通过专用异常交给 ScreenTool 映射。
+"""
+
 from __future__ import annotations
 
 import json
@@ -13,6 +19,11 @@ SYSTEM_PROMPT = VISION_JSON_PROMPT
 
 
 class QwenVLClient:
+    """Qwen VL provider 的无会话客户端适配器。
+
+    实例可随 VisionService 常驻并复用配置/HTTP transport；每次 analyze 独立完成，
+    不缓存截图或对话，短期复用由 ``VisionSession`` 管理。
+    """
     def __init__(self, api_key: str | None = None, workspace_id: str | None = None,
                  region: str | None = None, model: str | None = None,
                  timeout: float = 30.0, client_factory: Callable[..., Any] | None = None) -> None:
@@ -33,6 +44,7 @@ class QwenVLClient:
 
     def analyze_image(self, image_data_url: str, user_question: str,
                       image_size: tuple[int, int] | None = None) -> VisionContext:
+        """提交单张图像，并把 provider JSON 归一化为 VisionContext。"""
         if not self.api_key or not self.workspace_id:
             raise VisionConfigError(
                 "视觉能力还没有配置好，需要先设置 DASHSCOPE_API_KEY 和 DASHSCOPE_WORKSPACE_ID。"

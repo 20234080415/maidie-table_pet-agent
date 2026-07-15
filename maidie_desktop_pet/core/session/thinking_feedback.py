@@ -1,3 +1,9 @@
+"""为进行中的 AI 请求选择简短、非最终的等待反馈。
+
+Session 在后台 Brain 开始工作后调用本模块，根据 Time、Weather、Vision 或技术请求
+选择不同提示；这些文本只缓解等待感，不参与 Router 决策或最终 Synthesizer 输出。
+"""
+
 from __future__ import annotations
 
 import random
@@ -9,7 +15,10 @@ from core.vision.intent_rules import is_cursor_region_request
 
 
 class ThinkingFeedbackPool:
-    """Chooses a brief, non-final conversational cue for an active request."""
+    """按请求类型选择简短且非最终的对话提示。
+
+    默认实例贯穿 Session 生命周期；注入 ``chooser`` 可让测试控制随机选择。
+    """
 
     SCREEN = ("让我看看。", "我瞧瞧屏幕。", "嗯，我看看这里。", "我先看一眼。")
     CURSOR = ("把鼠标移回要看的位置，三秒后我截图。",)

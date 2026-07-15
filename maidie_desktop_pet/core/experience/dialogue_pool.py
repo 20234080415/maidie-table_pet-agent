@@ -1,3 +1,9 @@
+"""集中管理 Experience 层的短句与情境化随机选择。
+
+Behavior/Proactive 组件按 key 请求短句，DialoguePool 负责去重复和注入随机选择器；
+这些反馈不替代 Brain Synthesizer 的正式回答。
+"""
+
 from __future__ import annotations
 
 import random

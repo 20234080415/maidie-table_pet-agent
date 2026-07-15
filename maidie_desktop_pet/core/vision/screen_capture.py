@@ -1,3 +1,9 @@
+"""实现 Windows 多屏环境下的显式截图范围裁剪。
+
+``VisionService`` 按 Router 已确定的 scope 调用本模块；ScreenCapture 排除 Maidie 自身
+活动窗口、校验全局坐标并把底层异常统一为 ``VisionCaptureError``，不保存图像到磁盘。
+"""
+
 from __future__ import annotations
 
 import ctypes
@@ -12,6 +18,11 @@ from core.vision.errors import VisionCaptureError
 
 
 class ScreenCapture:
+    """按全屏、外部活动窗口、鼠标附近或框选矩形捕获内存图像。
+
+    实例无历史截图状态，可随 VisionService 常驻；注入 grabber/坐标 provider 便于测试
+    多屏与边界场景，而不依赖真实桌面。
+    """
     def __init__(self, grabber: Callable[..., Image.Image] | None = None,
                  cursor_provider: Callable[[], tuple[int, int]] | None = None,
                  bounds_provider: Callable[[], tuple[int, int, int, int]] | None = None,
@@ -35,6 +46,7 @@ class ScreenCapture:
             raise VisionCaptureError("无法获取全屏截图") from exc
 
     def capture_active_window(self) -> Image.Image:
+        """捕获最近的可见外部窗口，并明确排除 Maidie 自身进程。"""
         try:
             bbox = self._active_window_bounds_provider()
             if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
@@ -88,6 +100,7 @@ class ScreenCapture:
 
     def capture_cursor_region(self, width: int = 1000,
                               height: int = 800) -> Image.Image:
+        """捕获以光标为中心且夹取在虚拟屏幕内的区域。"""
         try:
             if width <= 0 or height <= 0:
                 raise ValueError("cursor region dimensions must be positive")
@@ -107,6 +120,7 @@ class ScreenCapture:
 
     def capture_region(self, x: int, y: int, width: int,
                        height: int) -> Image.Image:
+        """校验并捕获用户框选的全局坐标矩形。"""
         if width < 20 or height < 20:
             raise VisionCaptureError("框选区域太小")
         try:

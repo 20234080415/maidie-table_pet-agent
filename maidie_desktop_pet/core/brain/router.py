@@ -1,3 +1,9 @@
+"""编排 Maidie 的生产 Agent 循环。
+
+``BrainRouter`` 连接 LLM/规则 Router、Planner、Executor、Synthesizer、Memory 与
+Vision session，是聊天和任务的统一入口；各阶段仍保持单一职责以便安全校验和降级。
+"""
+
 from __future__ import annotations
 
 import logging
@@ -17,7 +23,12 @@ from core.vision.intent_rules import detect_vision_scope
 
 
 class BrainRouter:
-    """Maidie Core Brain V4: the sole production gate for chat and tools."""
+    """生产 Brain 的总编排器，也是 chat 与 Tool 的唯一入口。
+
+    对象通常随 ``PetController`` 生命周期常驻，并跨请求保留 Router 短期上下文及
+    Vision session 引用；每次 ``route`` 依次完成分类、规划、执行和合成，但不直接
+    操作 PyQt UI。会话结束时由 ``clear_conversation_state`` 清理跨轮状态。
+    """
 
     TECHNICAL = re.compile(r"\b(code|error|debug|api|database|git|python|javascript|docker)\b|代码|报错|调试|架构", re.I)
     VISION_FOLLOW_UP = re.compile(
@@ -61,9 +72,15 @@ class BrainRouter:
 
     def route(self, user_input: str, context: list[dict[str, Any]] | None = None,
               on_delta: Callable[[str], None] | None = None) -> dict[str, str]:
+        """运行一次完整 Agent 循环并返回可展示结果。
+
+        ``context`` 提供 Session 历史与 Attention；``on_delta`` 存在时接收结构化
+        进度/输出事件。Tool 结果不会直接展示，而是统一交给 Synthesizer。
+        """
         context = context or []
         total_started = monotonic()
         session = self._vision_session()
+        # 清除 Vision 上下文是显式 Session 动作，优先于一般意图识别。
         if self.VISION_CLEAR.fullmatch(user_input.strip()):
             service = self._vision_service()
             if service is not None and hasattr(service, "clear_session"):
@@ -79,6 +96,7 @@ class BrainRouter:
                                    "active_window", total_started, 0.0)
             return result
 
+        # 澄清确认只在短时间窗口内有效，避免旧的“可以”触发新的屏幕读取。
         if (self._vision_clarification_pending and
                 monotonic() - self._vision_clarification_created_at > 60):
             self._vision_clarification_pending = False
@@ -121,6 +139,7 @@ class BrainRouter:
             )
         else:
             self._vision_clarification_pending = False
+        # 只有任务型 intent 进入 Planner/Executor；普通聊天直接进入 Synthesizer。
         if intent in {"task", "vision", "screen", "code_task", "system_task"}:
             attention = next((item.get("attention") for item in reversed(context)
                               if isinstance(item, dict) and "attention" in item), None)
@@ -151,6 +170,7 @@ class BrainRouter:
                                            "selected_rect": selected_rect})
             finally:
                 mark(plan_duration_ms=round((monotonic() - started) * 1000, 3))
+            # Executor 返回结构化事实，并在 Tool 边界重新验证 Planner 参数。
             executions = (
                 self.executor.execute(plan, user_input, on_event=on_delta)
                 if on_delta else self.executor.execute(plan, user_input)
@@ -158,6 +178,7 @@ class BrainRouter:
             source = self._source_for_intent(intent)
             started = monotonic()
             try:
+                # Synthesizer 是结构化 Tool 数据转成用户文本的唯一生产出口。
                 result = self.synthesizer.synthesize(
                     user_input, source, plan, executions, self._memory_context(), context, on_delta,
                     technical=self._is_technical(source, user_input),

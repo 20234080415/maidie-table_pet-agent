@@ -1,3 +1,9 @@
+"""把网络 SearchService 封装为可配置的 Network Plugin。
+
+``SearchTool`` 通过本模块执行检索并取得统一 schema；Plugin 负责 API 配置、查询清洗和
+异常归一化，不决定何时联网，也不生成最终回答。
+"""
+
 from __future__ import annotations
 
 import re
@@ -9,6 +15,11 @@ from network.search import SearchService
 
 
 class NetworkPlugin(Plugin):
+    """管理 SearchService 配置并返回结构化网络检索结果。
+
+    实例随 ToolRegistry 相关依赖常驻，设置更新时可重新 configure；每次 handle 独立执行，
+    不保存对话上下文。
+    """
     INTENT_PATTERN = re.compile(
         r"查一下|查查|搜索|搜一下|联网看看|联网查|最新|天气|现在几点|"
         r"官方文档|官网|新闻|实时|search|look up|weather|latest|official docs",

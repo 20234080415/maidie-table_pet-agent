@@ -1,9 +1,20 @@
+"""聚合窗口、鼠标、空闲、应用和剪贴板的本地 Awareness 状态。
+
+``PetController``/ScreenTool 通过单一快照接口读取环境信息，避免 Brain 直接依赖多个
+Tracker；聚合层不扩大采集范围，也不把数据自动发送到网络服务。
+"""
+
 from __future__ import annotations
 
 from typing import Any
 
 
 class AwarenessContext:
+    """多个 Awareness Tracker 的只读聚合门面。
+
+    实例随桌宠运行期常驻并引用各 Tracker；``snapshot`` 用于体验层，
+    ``screen_awareness_snapshot`` 是 Vision 不可用时的结构化降级来源。
+    """
     def __init__(self, mouse_tracker: Any, window_tracker: Any,
                  app_tracker: Any | None = None, screen_reader: Any | None = None,
                  clipboard_tracker: Any | None = None) -> None:

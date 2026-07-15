@@ -1,3 +1,9 @@
+"""把后台 Tool 的确认请求安全桥接到 PyQt 主线程。
+
+``ConfirmationBroker`` 是 legacy ``core.agent`` 中仍被生产路径使用的基础设施：Worker
+发起请求后等待主线程 UI 决策，Broker 用 request id 配对结果，避免跨线程直接操作窗口。
+"""
+
 from __future__ import annotations
 
 from threading import Event, Lock

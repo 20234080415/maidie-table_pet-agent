@@ -1,3 +1,9 @@
+"""保留旧 Agent 调用方使用的粗粒度意图模型。
+
+生产意图路由已迁移到 ``core.brain.LLMIntentRouter``；本模块只维持兼容接口和测试，
+新 Router/Planner 逻辑不应继续添加到这里。
+"""
+
 from __future__ import annotations
 
 import re
@@ -6,6 +12,7 @@ from typing import Any
 
 
 class Intent(str, Enum):
+    """旧 AgentCore 可识别的有限意图集合。"""
     SCREEN_AWARENESS = "SCREEN_AWARENESS"
     DIRECT_TOOL = "DIRECT_TOOL"
     DECISION_TASK = "DECISION_TASK"

@@ -1,3 +1,9 @@
+"""在 Synthesizer 出口统一 Maidie 的语气和响应字段。
+
+``MaidieStyle`` 从 ``core.prompts.personality`` 获取基线人格，并对本地模板与 LLM 结果
+使用相同的文本保护和默认值，避免不同回答路径呈现不一致。
+"""
+
 from __future__ import annotations
 
 import re

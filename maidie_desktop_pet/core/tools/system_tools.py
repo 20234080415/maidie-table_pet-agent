@@ -1,3 +1,9 @@
+"""提供少量显式、受控的本地系统能力。
+
+SystemTool 位于 Planner 与操作系统之间，采用 deny-by-default：危险动作不实现，写入或
+界面操作要求确认，读取动作也只接受结构化参数；Planner 字段不等同于授权。
+"""
+
 from __future__ import annotations
 
 import ctypes
@@ -12,7 +18,11 @@ from core.tools.base import Tool, ToolResult
 
 
 class SystemTool(Tool):
-    """Explicit OS operations with deny-by-default mutation controls."""
+    """对显式 OS 操作实施 deny-by-default 与二次确认。
+
+    实例由 ToolRegistry 持有，可注入确认回调和剪贴板写入器；每次 ``execute`` 独立
+    校验 action，禁止任意 shell、脚本执行和删除路径。
+    """
 
     name = "system"
     DANGEROUS_ACTIONS = {"delete_file", "execute_script", "system_command"}
@@ -35,6 +45,11 @@ class SystemTool(Tool):
 
     def execute(self, action: str, params: dict[str, Any] | None = None,
                 confirmed: bool = False) -> ToolResult:
+        """验证 action/确认状态后执行一个 allowlist 系统操作。
+
+        不支持或危险动作始终拒绝。``confirmed`` 仅供可信调用边界，BrainExecutor 会
+        主动移除 Planner 伪造的同名参数。
+        """
         params = dict(params or {})
         if action in self.DANGEROUS_ACTIONS:
             return self._denied(action, "dangerous action is not implemented")

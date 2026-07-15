@@ -1,3 +1,9 @@
+"""根据桌宠状态生成自主移动与待机行为意图。
+
+``AutonomousBehaviorController`` 返回声明式决策，实际位移仍由 ``MovementController``
+和 ``PetController`` 执行，从而隔离行为策略与物理更新。
+"""
+
 from __future__ import annotations
 
 import random
@@ -9,6 +15,7 @@ from core.movement import Bounds, Vec2
 
 
 class BehaviorKind(str, Enum):
+    """自主行为策略可选择的有限行为集合。"""
     WANDER = "wander"
     IDLE_PAUSE = "idle_pause"
     CURIOUS = "curious"
@@ -17,6 +24,7 @@ class BehaviorKind(str, Enum):
 
 @dataclass(frozen=True)
 class BehaviorIntent:
+    """行为层提交给控制器的一次不可变决策。"""
     kind: BehaviorKind
     target: Vec2 | None = None
     run: bool = False

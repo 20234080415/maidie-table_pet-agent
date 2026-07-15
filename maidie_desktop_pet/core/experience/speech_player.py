@@ -1,3 +1,9 @@
+"""把回复文本切分为可节奏播放的语音/气泡片段。
+
+``ChatStreamer`` 推送 token，``SpeechPlayer`` 按句子和标点形成片段并驱动定时播放；
+它管理输出节奏，不参与 Session 身份校验或最终文本生成。
+"""
+
 from __future__ import annotations
 
 import random
@@ -11,6 +17,7 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 @dataclass(frozen=True)
 class SpeechSegment:
+    """一段待播放文本及其停留时长和可选表现状态。"""
     text: str
     pause_after_ms: int = 260
     emotion: str | None = None

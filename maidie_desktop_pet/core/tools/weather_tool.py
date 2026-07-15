@@ -1,3 +1,9 @@
+"""从 Open-Meteo 获取并短期缓存结构化天气事实。
+
+WeatherTool 负责地点解析、HTTP 错误边界和 TTL cache；它不生成穿衣或出行建议，
+复杂判断留给 Synthesizer/LLM 基于事实完成。
+"""
+
 from __future__ import annotations
 
 import re
@@ -11,6 +17,11 @@ from core.performance import mark
 
 
 class WeatherTool(Tool):
+    """按城市和日期查询天气，并在实例内维护短期缓存。
+
+    实例随 ToolRegistry 常驻，缓存以地点和日期为 key；注入 clock/http_get 可在测试中
+    覆盖 TTL、超时和异常路径而无需真实网络。
+    """
     name = "weather"
     URL = "https://api.open-meteo.com/v1/forecast"
     PATTERN = re.compile(r"天气|气温|温度|下雨|weather|temperature", re.I)
@@ -33,6 +44,7 @@ class WeatherTool(Tool):
         return bool(self.PATTERN.search(query.strip()))
 
     def run(self, query: str) -> ToolResult:
+        """解析地点与日期，返回天气事实或结构化网络错误。"""
         target = "tomorrow" if "明天" in query or "tomorrow" in query.lower() else "today"
         city, latitude, longitude = self._location(query)
         key = (city, target)

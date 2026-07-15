@@ -1,3 +1,9 @@
+"""定义 Maidie 人格基线并按用户 preset 构造系统提示词。
+
+``ConfigStore`` 通过本模块保持人格配置兼容，``MaidieStyle`` 再把结果注入 Synthesizer；
+集中维护可避免多个 LLM client 出现不同人格版本。
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -60,6 +66,7 @@ PERSONALITY_PRESETS: dict[str, dict[str, Any]] = {
 
 
 def build_personality_prompt(preset_id: str, custom_prompt: str = "") -> str:
+    """按 preset 与用户覆盖项生成最终人格 prompt，不执行模型调用。"""
     custom = str(custom_prompt or "").strip()
     if preset_id == "custom" and custom:
         return custom

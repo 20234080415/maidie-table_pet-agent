@@ -1,3 +1,9 @@
+"""把 Attention、Emotion 和当前上下文合成为行为建议。
+
+``BehaviorOrchestrator`` 只返回 ``BehaviorDecision``，不直接操作窗口或状态机；
+``PetController`` 在统一优先级与主线程边界内决定是否执行。
+"""
+
 from __future__ import annotations
 
 import re
@@ -10,6 +16,7 @@ from core.experience.attention import AttentionState
 
 @dataclass(frozen=True)
 class BehaviorDecision:
+    """体验层提交给 PetController 的一次声明式行为建议。"""
     kind: str
     reason: str
     action: str = "idle"

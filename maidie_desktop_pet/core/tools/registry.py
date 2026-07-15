@@ -1,3 +1,9 @@
+"""维护 Executor 可访问的 Tool 名称到实例映射。
+
+Registry 是 Brain 与具体能力之间的依赖注入边界；它只负责注册、查找和兼容匹配，
+不决定何时调用 Tool，也不绕过 ``BrainExecutor`` 的 allowlist 与参数校验。
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -6,6 +12,10 @@ from core.tools.base import Tool, ToolResult
 
 
 class ToolRegistry:
+    """保存进程内 Tool 实例的轻量注册表。
+
+    通常在应用启动时构造并贯穿运行期；Tool 资源生命周期仍由各实现或上层负责。
+    """
     def __init__(self, tools: Iterable[Tool] | None = None) -> None:
         self.tools = list(tools or [])
 

@@ -1,3 +1,9 @@
+"""维护可累积、可衰减的体验层情绪状态。
+
+与旧 ``core.emotion`` 离散标签不同，``EmotionState`` 接收交互事件并计算主导情绪，
+由 BehaviorOrchestrator/PetController 映射到动画和反馈。
+"""
+
 from __future__ import annotations
 
 import math

@@ -1,3 +1,9 @@
+"""加载、合并和更新 Maidie 的运行配置。
+
+``ConfigStore`` 连接打包默认值、用户配置与 ``core.prompts`` 人格入口，对外只暴露经过
+兼容合并的设置；持久化细节集中在此，避免 UI/Brain 各自解释配置 schema。
+"""
+
 from __future__ import annotations
 
 import json

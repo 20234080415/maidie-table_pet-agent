@@ -1,3 +1,9 @@
+"""根据活动窗口与交互事件维护桌宠 Attention。
+
+``AttentionManager`` 将环境输入压缩成稳定状态和可注入上下文，供 BehaviorOrchestrator
+与 BrainPlanner 使用；它不直接改变动画或发起 AI 请求。
+"""
+
 from __future__ import annotations
 
 import re
@@ -8,6 +14,7 @@ from typing import Any, Callable
 
 @dataclass(frozen=True)
 class AttentionState:
+    """可安全传给行为与 Brain 层的不可变 Attention 快照。"""
     app_name: str = "unknown"
     window_title: str = ""
     activity_type: str = "unknown"
@@ -17,6 +24,11 @@ class AttentionState:
 
 
 class AttentionManager:
+    """维护 Attention 快照及其更新节流策略。
+
+    实例随 PetController 常驻，由 Awareness/交互事件更新；Brain 只读取精简结果，
+    避免直接耦合窗口跟踪实现。
+    """
     REFERENCES_CURRENT_VIEW = re.compile(
         r"(?:这个|这里|屏幕上|这题|这个报错|当前(?:页面|窗口|屏幕))|"
         r"\b(?:this|here|on (?:the|my) screen|this error)\b", re.I,

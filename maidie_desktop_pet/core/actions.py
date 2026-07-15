@@ -1,3 +1,9 @@
+"""定义桌宠可触发动作的元数据与注册表。
+
+``ActionRegistry`` 从资源配置构建动作定义，供 ``PetController``/动画层按冷却、状态和
+消息匹配选择动作；模块只管理规则与触发时间，不直接播放动画。
+"""
+
 from __future__ import annotations
 
 import json
@@ -9,6 +15,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ActionDefinition:
+    """一个动作的静态配置，描述触发条件而非运行期动画状态。"""
     name: str
     duration_ms: int = 1000
     cooldown_ms: int = 0

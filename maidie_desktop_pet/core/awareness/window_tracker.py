@@ -1,3 +1,9 @@
+"""读取并缓存当前外部活动窗口的最小元数据。
+
+Tracker 为 AppTracker、AwarenessContext 和 Vision scope 提供标题/句柄/边界；它会排除
+Maidie 自身窗口，且不读取窗口像素或文本内容，屏幕理解仍由显式 Vision 流程完成。
+"""
+
 from __future__ import annotations
 
 import ctypes

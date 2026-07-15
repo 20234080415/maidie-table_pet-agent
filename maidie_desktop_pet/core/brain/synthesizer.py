@@ -1,3 +1,9 @@
+"""把 Plan 与 Tool 事实合成为 Maidie 的最终用户输出。
+
+Synthesizer 是 Brain 中唯一允许生成自然语言的阶段：它选择 Chat/Coding LLM、处理
+本地确定性降级、应用 ``MaidieStyle``，并可发出 Session 消费的结构化输出事件。
+"""
+
 from __future__ import annotations
 
 import re
@@ -13,7 +19,11 @@ from core.session.output_events import OutputMode
 
 
 class Synthesizer:
-    """The only V4 layer allowed to turn facts into words for the user."""
+    """将结构化执行结果转换为用户文案的唯一生产组件。
+
+    实例随 BrainRouter 常驻，持有 LLM client、人格样式和 Coding formatter；每次调用
+    不保存会话状态，所需历史和 Memory context 均由调用方显式传入。
+    """
 
     def __init__(self, chat_client: Any, codex_client: Any | None = None,
                  style: MaidieStyle | None = None, personality_prompt: str = "",
@@ -29,9 +39,15 @@ class Synthesizer:
                    context: list[dict[str, Any]], on_delta: Callable[[str], None] | None = None,
                    technical: bool = False,
                    output_mode: OutputMode | None = None) -> dict[str, Any]:
+        """生成包含文本、情绪、动作及可选展示元数据的最终结果。
+
+        ``tool_data`` 是 Executor 的结构化记录；简单 Tool 事实与错误优先使用本地模板，
+        以减少延迟和事实漂移。``on_delta`` 存在时发送 OutputEvent payload，而非模型原文。
+        """
         client = self.codex_client if technical else self.chat_client
         prompt = self._prompt(user_input, source, plan, tool_data, memory_context)
         display: dict[str, Any] = {}
+        # 可确定的澄清、失败和简单事实优先本地合成，LLM 只处理需要语言推理的结果。
         if source == "clarification":
             mark(local_response_used=True)
             normalized = {"text": "你是想让我看屏幕吗？可以说‘看当前窗口’、‘看全屏’、‘看鼠标这块’，或者‘我框选一下’。",
@@ -74,6 +90,7 @@ class Synthesizer:
             except Exception:
                 normalized = {"text": "这次没拿到可靠结果，稍后再试试嘛。",
                               "emotion": "thinking", "action": "talk", "state": "talking"}
+        # 所有分支经过同一人格与字段归一化出口，保证 UI 数据契约一致。
         normalized["text"] = self.style.preserve(normalized.get("text", ""))
         result = self.style.normalize_fields(normalized, source)
         if display:

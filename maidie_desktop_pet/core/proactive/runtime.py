@@ -1,3 +1,9 @@
+"""在应用 tick 中运行 ProactiveEngine 并转发获准决策。
+
+Runtime 保存最少的调度引用，不拥有 Engine 策略或 UI；这种分离让主动行为可以在 busy、
+拖拽等状态下由上层统一抑制。
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -13,6 +19,11 @@ class ProactiveRuntime:
         self.tool_registry, self.memory = tool_registry, memory
 
     def tick(self) -> tuple[dict[str, Any], ProactiveDecision | None]:
+        """聚合 Awareness，触发 Scheduler，并返回至多一个主动行为决策。
+
+        天气条件只在任务确有依赖时查询；返回决策仍需由 PetController 根据 busy/状态机
+        决定是否展示或提交给 Session。
+        """
         context = self.awareness.snapshot()
         if self._needs_weather():
             tool = self.tool_registry.get("weather")

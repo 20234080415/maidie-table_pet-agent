@@ -1,3 +1,9 @@
+"""定义 Vision provider 与 Brain 之间的结构化上下文契约。
+
+``QwenVLClient`` 创建该对象，``VisionSession`` 短期保存，ProblemAnalyzer/ScreenTool 消费；
+归一化集中在此，避免下游依赖 provider 原始 JSON 的缺失字段或异常类型。
+"""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -12,6 +18,11 @@ VALID_TASK_TYPES = {
 
 @dataclass
 class VisionContext:
+    """一次屏幕理解的标准化事实及置信度。
+
+    对象可序列化跨越 Tool/Executor 边界；``raw_response`` 仅用于诊断兼容，不应作为
+    Synthesizer 的主要事实来源。
+    """
     screen_summary: str = ""
     visible_text: str = ""
     task_type: str = "unknown"

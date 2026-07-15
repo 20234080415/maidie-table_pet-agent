@@ -1,3 +1,9 @@
+"""提供非阻塞的全屏框选 overlay，产出全局屏幕矩形。
+
+``PetController`` 在用户明确选择区域时显示本组件，并通过 Qt signal 接收选择或取消；
+overlay 只收集坐标，不截图、不调用 Vision API，也不在事件处理器中阻塞主线程。
+"""
+
 from __future__ import annotations
 
 from PyQt6.QtCore import QPoint, QRect, Qt, pyqtSignal
@@ -6,7 +12,11 @@ from PyQt6.QtWidgets import QApplication, QWidget
 
 
 class RegionSelector(QWidget):
-    """Non-blocking top-level overlay for selecting a global screen rectangle."""
+    """用于选择全局屏幕矩形的非阻塞顶层 overlay。
+
+    实例可跨多次选择复用；``begin`` 重置瞬时拖拽状态，完成/取消后隐藏并通过 signal
+    把控制权交还 PetController。
+    """
 
     region_selected = pyqtSignal(QRect)
     selection_cancelled = pyqtSignal()

@@ -1,3 +1,9 @@
+"""维护仅服务于当前对话的短期任务事实。
+
+``LLMIntentRouter`` 用它从历史消息恢复事件时间，并解析“还有多久”等省略式追问；
+这里不写入长期 Memory，避免临时事实跨 Session 泄漏或过期后继续生效。
+"""
+
 from __future__ import annotations
 
 import re
@@ -5,7 +11,11 @@ from typing import Any
 
 
 class ShortTermTaskContext:
-    """Keeps explicit event times for immediate conversational follow-ups."""
+    """保存显式事件时间，供紧邻的省略式追问复用。
+
+    实例随 LLMIntentRouter 的会话状态创建或清空；``from_messages`` 可从 Session 历史
+    重建上下文，但不会访问持久化 Memory。
+    """
 
     TIME_TEXT = (r"(?:(?:上午|中午|下午|晚上|凌晨)\s*)?"
                  r"(?:\d{1,2}[.:]\d{1,2}|[零一二两三四五六七八九十\d]+点"

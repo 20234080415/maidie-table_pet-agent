@@ -1,3 +1,9 @@
+"""探测并通过固定 allowlist 安装本地 OpenCode CLI。
+
+该模块服务于设置/引导流程，不参与日常 Brain Tool 执行；所有安装命令都由受限模板
+构造，避免把用户输入拼接为任意 shell，并把过程结果结构化返回给 UI。
+"""
+
 from __future__ import annotations
 
 import shutil
@@ -9,7 +15,11 @@ from typing import Any
 
 
 class CodingAgentInstaller:
-    """Installs OpenCode through a fixed package-manager allowlist."""
+    """通过固定包管理器 allowlist 安装并检查 OpenCode。
+
+    实例可在设置页面操作期间复用；它不保存安装状态，每次从 PATH、配置文件与
+    子进程结果重新探测。
+    """
 
     INSTALLERS = {
         "npm": ("npm", "npm.cmd"),

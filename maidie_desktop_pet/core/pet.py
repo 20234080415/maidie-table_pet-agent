@@ -1,3 +1,9 @@
+"""Maidie 桌宠运行期的顶层控制器与依赖编排入口。
+
+``PetController`` 连接 PyQt 交互、Movement/Fence、Experience、Brain Session、Memory 与
+配置。它负责协调生命周期和事件转发，业务判断尽量下沉到对应子系统，UI 更新留在主线程。
+"""
+
 from __future__ import annotations
 
 import logging
@@ -566,6 +572,11 @@ class PetController(QObject):
             )
 
     def submit_text(self, message: str, proactive: bool = False) -> None:
+        """把用户或 Proactive 文本提交给唯一 AISessionCoordinator。
+
+        UI 线程只处理 busy/框选等即时门控；实际 Router/LLM/Tool 工作由 Session 提交到
+        后台 Executor。selected-region 请求先完成显式框选，避免在未获范围时截图。
+        """
         if getattr(self, "_shutting_down", False):
             return
         if self.ai_session.busy:
@@ -581,6 +592,7 @@ class PetController(QObject):
 
     def complete_region_selection(self, message: str,
                                   rect: tuple[int, int, int, int]) -> None:
+        """保存本次显式框选坐标，并继续原先暂停的 AI 请求。"""
         if getattr(self, "_shutting_down", False):
             return
         self._selected_region_rect = rect
@@ -607,6 +619,7 @@ class PetController(QObject):
         target_priority = BehaviorPriority.PROACTIVE if proactive else BehaviorPriority.AI_TALKING
         self.set_state(target_state, target_priority, 400, force=True,
                        animation="happy" if proactive else None)
+        # Session 历史、Attention 和一次性框选坐标在此汇合，再作为显式 context 进入 Brain。
         context = self.memory.get_recent()
         if self._selected_region_rect is not None:
             context.append({"vision_selected_rect": self._selected_region_rect,
@@ -711,6 +724,7 @@ class PetController(QObject):
                 self.memory.generation_token()
                 if hasattr(self.memory, "generation_token") else None
             )
+            # Memory 抽取是请求完成后的异步旁路，不能阻塞气泡完成或 Qt 主线程。
             future = self._memory_executor.submit(
                 self._extract_and_store_memories,
                 message,

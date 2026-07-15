@@ -1,3 +1,9 @@
+"""把受限工作区内的 Coding Agent 能力封装为结构化 Tool。
+
+本模块验证启用状态、workspace 边界、provider/command 与操作类型，再委托
+``CodingAgentProcessRunner``；原始 CLI 输出会被归一化供 Executor 和 Synthesizer 使用。
+"""
+
 from __future__ import annotations
 
 import json
@@ -13,8 +19,11 @@ from core.tools.coding_agent_process import CodingAgentProcessRunner
 
 
 class CodingAgentTool(Tool):
-    """Read-only adapter for a local OpenCode or Codex CLI."""
+    """面向 BrainExecutor 的本地 Coding Agent 适配器。
 
+    实例随 ToolRegistry 常驻并持有可取消 Runner；配置可由设置层刷新。每次 ``run``
+    都重新解析目标路径，确保参数无法逃逸已配置 workspace。
+    """
     name = "coding_agent"
     OPERATIONS = {
         "analyze_project", "explain_module", "propose_fix", "propose_patch", "test_plan",

@@ -1,3 +1,9 @@
+"""集中构造 Synthesizer 的事实到自然语言提示词。
+
+输入由人格、用户请求、Plan、Tool 数据和 Memory context 组成；函数只序列化上下文，
+LLM 选择、失败降级和输出归一化由 ``core.brain.synthesizer`` 负责。
+"""
+
 from __future__ import annotations
 
 import json
@@ -12,6 +18,7 @@ def build_synthesizer_prompt(
     tool_data: list[dict[str, Any]],
     memory_context: str,
 ) -> str:
+    """把结构化 Agent 上下文组装为 Synthesizer 的单次请求 prompt。"""
     facts = json.dumps(tool_data, ensure_ascii=False, default=str)
     task = (
         "你是 Maidie 的推理与回答模块。视觉模型只负责观察，最终答案由你生成。"

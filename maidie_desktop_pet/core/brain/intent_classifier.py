@@ -1,3 +1,9 @@
+"""提供 LLM Router 失败时的确定性意图降级分类。
+
+该分类器只输出粗粒度 intent，不负责规划或调用 Tool；正常路径由
+``LLMIntentRouter`` 使用，网络或解析异常时才依靠这里保证基本可用性。
+"""
+
 from __future__ import annotations
 
 import re

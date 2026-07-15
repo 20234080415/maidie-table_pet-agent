@@ -1,3 +1,9 @@
+"""为流式聊天气泡提供最小、可替换的控制门面。
+
+Session/ChatStreamer 通过本类开始、追加和完成展示，具体窗口实现由构造参数注入；
+这样核心流式状态无需直接依赖某个 QWidget 类。
+"""
+
 from __future__ import annotations
 
 from typing import Any, Callable

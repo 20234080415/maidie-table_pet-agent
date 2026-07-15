@@ -1,3 +1,9 @@
+"""导出 Maidie 显式触发的屏幕理解管线。
+
+BrainRouter 决定是否及以何种 scope 使用 Vision，Capture/Service/Client 完成内存处理，
+VisionSession 仅保留短期结构化上下文；本包不提供后台静默监控入口。
+"""
+
 from core.vision.errors import (VisionAPIError, VisionCaptureError, VisionConfigError,
                                 VisionError, VisionParseError)
 from core.vision.qwen_vl_client import QwenVLClient

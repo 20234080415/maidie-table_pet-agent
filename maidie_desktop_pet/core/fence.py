@@ -1,3 +1,9 @@
+"""实现桌宠活动围栏的几何约束与边缘交互。
+
+``FenceZone`` 保存用户配置的有效区域，``FenceController`` 将其接入 Movement 与体验层；
+围栏只约束位置和反馈，不拥有窗口拖拽或动画生命周期。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

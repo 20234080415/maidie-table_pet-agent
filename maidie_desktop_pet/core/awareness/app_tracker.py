@@ -1,3 +1,9 @@
+"""把活动窗口信息归一化为应用级 Awareness 快照。
+
+``AppTracker`` 复用 ``WindowTracker`` 的本地结果，为 Experience/Brain 提供稳定的应用名
+和上下文分类，不读取窗口内容，也不主动触发 Vision。
+"""
+
 from __future__ import annotations
 
 import ctypes

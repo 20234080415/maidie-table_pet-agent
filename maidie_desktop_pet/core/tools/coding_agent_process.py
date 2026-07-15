@@ -1,3 +1,9 @@
+"""以可取消、可超时的方式运行本地 Coding Agent 子进程。
+
+``CodingAgentTool`` 将已验证的命令交给本模块；Runner 负责流式收集输出、识别配置等待、
+限制保留行数，并在取消/超时时清理整个进程树，不解析业务结论。
+"""
+
 from __future__ import annotations
 
 import os
@@ -11,6 +17,11 @@ from typing import Any, Callable
 
 
 class CodingAgentProcessRunner:
+    """管理一次本地 CLI 进程及其输出、超时和取消生命周期。
+
+    单个实例同一时刻只跟踪一个进程；``run`` 返回后可再次使用。锁保护进程引用，
+    ``cancel`` 可从其他线程请求终止，回调用于把状态交给 Tool/Session 层。
+    """
     SETUP_WORDS = ("api key", "provider", "login", "connect", "auth", "configure", "model")
     ANSI_ESCAPE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 
@@ -27,6 +38,11 @@ class CodingAgentProcessRunner:
             on_output_line: Callable[[dict[str, Any]], None] | None = None,
             on_status_change: Callable[[dict[str, Any]], None] | None = None,
             on_finish: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+        """运行已构造的 argv，并返回有界的结构化进程结果。
+
+        ``args`` 必须由上层 allowlist 构造，``cwd`` 已由 Workspace 边界验证；total/idle
+        timeout 分别限制总时长和无输出等待，回调只报告事件。
+        """
         started = monotonic()
         last_output = started
         output_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
@@ -38,6 +54,7 @@ class CodingAgentProcessRunner:
         self._cancel.clear()
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         try:
+            # shell=False 保证经过验证的 argv 不会再次被 shell 解释。
             process = subprocess.Popen(
                 list(args), cwd=cwd, stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",

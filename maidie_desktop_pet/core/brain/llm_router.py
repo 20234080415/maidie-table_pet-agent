@@ -1,3 +1,9 @@
+"""把用户输入规范化为 BrainPlanner 可消费的意图元数据。
+
+路由优先复用 Session 短期上下文和确定性 fast route，再请求 LLM；所有来源最终经过
+同一 schema 归一化，失败时退回 ``IntentClassifier``，且不在此执行 Tool。
+"""
+
 from __future__ import annotations
 
 import json
@@ -33,7 +39,13 @@ class LLMIntentRouter:
         self.task_context = ShortTermTaskContext()
 
     def route(self, user_input: str, context: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """生成包含 intent、task_type、entities 与权限提示的标准 route。
+
+        ``context`` 只恢复当前 Session 的短期事实；结果保存到 ``last_route``，供
+        ``BrainRouter`` 在兼容 classify 接口之后继续构造 Plan。
+        """
         history_context = ShortTermTaskContext.from_messages(context or [])
+        # 先解析依赖上一轮事件时间的追问，避免为确定性上下文再次请求 LLM。
         self.task_context.event_times.update(history_context.event_times)
         contextual = self.task_context.resolve(user_input)
         self.task_context.observe(user_input)

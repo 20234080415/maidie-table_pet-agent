@@ -1,3 +1,9 @@
+"""封装桌宠位移、边界夹取和运动状态分类。
+
+``MovementController`` 由 ``PetController`` 在 tick 中驱动，并与 ``StateMachine`` 协调；
+几何计算保持独立，便于 Fence 和拖拽逻辑复用。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,6 +14,7 @@ from core.state import PetState
 
 @dataclass
 class Vec2:
+    """用于运动与围栏计算的二维坐标值对象。"""
     x: float = 0.0
     y: float = 0.0
 
@@ -17,6 +24,7 @@ class Vec2:
 
 @dataclass(frozen=True)
 class Bounds:
+    """描述桌宠可移动区域的矩形边界。"""
     left: float
     top: float
     right: float

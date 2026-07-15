@@ -1,3 +1,9 @@
+"""把 Coding Agent 原始结构化结果整理为稳定的分析面板数据。
+
+Formatter 不调用 LLM，也不执行代码修改；Synthesizer 使用它生成短摘要、详细内容和
+纯文本回退，使 UI 与具体 CLI 输出格式解耦。
+"""
+
 from __future__ import annotations
 
 import ast

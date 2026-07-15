@@ -1,3 +1,9 @@
+"""把 Vision 识别结果提炼为 Planner 可使用的问题上下文。
+
+``ScreenTool`` 使用本模块标准化屏幕中的错误、题目和可见文本；Planner 可据此有条件
+追加 Search，Synthesizer 则只消费结构化事实而非原始截图。
+"""
+
 from __future__ import annotations
 
 import re
@@ -7,6 +13,11 @@ from typing import Any
 
 @dataclass
 class ProblemContext:
+    """一次屏幕问题分析的稳定数据契约。
+
+    实例跨越 ScreenTool、Executor 与 Synthesizer；``needs_search/search_query`` 用来
+    表达可审计的条件式检索依赖。
+    """
     problem_type: str = "unknown"
     visible_text: str = ""
     error_message: str = ""

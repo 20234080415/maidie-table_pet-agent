@@ -1,3 +1,9 @@
+"""维护最近鼠标位置、速度和活动时间的轻量快照。
+
+``PetController`` 将已有鼠标事件喂给 Tracker，并由 ``IdleDetector`` 统一更新时间；
+该模块不安装额外监听器，避免 Awareness 隐式扩大输入采集范围。
+"""
+
 from __future__ import annotations
 
 from math import hypot

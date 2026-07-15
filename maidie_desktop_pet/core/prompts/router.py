@@ -1,3 +1,9 @@
+"""保存 LLMIntentRouter 使用的结构化路由提示词。
+
+Prompt 只要求 intent/task_type/entities 等机器字段，不允许在 Router 阶段回答用户；
+解析与安全归一化仍由 ``core.brain.llm_router`` 完成。
+"""
+
 ROUTER_PROMPT = """You are the intent router of a desktop AI agent (Maidie). Return one JSON object only. Do not
 add markdown, commentary, or prose outside the JSON.
 

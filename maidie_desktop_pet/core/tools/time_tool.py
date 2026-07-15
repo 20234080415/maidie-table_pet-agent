@@ -1,3 +1,9 @@
+"""提供无需 LLM 的本地时间事实与事件倒计时计算。
+
+Planner 可选择当前时间或 ``delta_until`` action；Tool 使用注入时钟便于测试，并返回
+结构化时间数据，由 Synthesizer 负责最终表达。
+"""
+
 from __future__ import annotations
 
 import re
@@ -8,6 +14,10 @@ from core.tools.base import Tool, ToolResult
 
 
 class TimeTool(Tool):
+    """以本地时区时钟回答时间查询和目标时间差。
+
+    实例通常无状态并随 Registry 常驻；``now_provider`` 注入使边界时间和时区行为可测试。
+    """
     name = "time"
     PATTERN = re.compile(r"时间|现在几点|几点|日期|星期|\b(time|today|now|date)\b", re.I)
 
@@ -25,6 +35,7 @@ class TimeTool(Tool):
 
     def execute(self, action: str = "now", *, target_time_text: str = "",
                 event: str = "") -> ToolResult:
+        """执行当前时间或倒计时 action，并返回标准化时间事实。"""
         if action != "delta_until":
             return self.run("now")
         now = self._now_provider()

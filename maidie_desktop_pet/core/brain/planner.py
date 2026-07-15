@@ -1,3 +1,9 @@
+"""将 Router 的意图元数据转换为可审计的 Tool 执行计划。
+
+Planner 只描述步骤、依赖和参数，不执行副作用，也不生成面向用户的回答。确定性的
+Plan schema 使 ``BrainExecutor`` 能再次验证 Router/LLM 产物并实施安全边界。
+"""
+
 from __future__ import annotations
 
 import logging
@@ -28,6 +34,11 @@ class BrainPlanner:
     def plan_for_intent(self, user_input: str, intent: str, memory: Any = None,
                         attention: dict[str, Any] | None = None,
                         clipboard_text: str = "") -> dict[str, Any]:
+        """为兼容 intent 构建 Plan，并附加桌宠 Attention 上下文。
+
+        新式结构化 route 由 :meth:`plan_route` 处理；返回值始终是 Executor 可遍历的
+        字典，不包含最终自然语言。
+        """
         if intent in {"screen", "vision"}:
             plan = self.screen_plan(user_input)
             return self._with_attention(plan, attention)
@@ -40,7 +51,11 @@ class BrainPlanner:
         return self._with_attention(self.plan(user_input, memory, clipboard_text), attention)
 
     def plan_route(self, user_input: str, route: dict[str, Any]) -> dict[str, Any]:
-        """Turn normalized router metadata into a deterministic tool plan."""
+        """把标准化 route 转成确定性 Tool Plan。
+
+        ``task_type`` 决定 Tool 与 action，``entities`` 仅提供数据参数；实际副作用仍由
+        Executor/Tool 重新校验，Router 的权限字段本身不构成授权。
+        """
         task_type = str(route.get("task_type") or "none")
         entities = dict(route.get("entities") or {})
         if task_type == "time_now":

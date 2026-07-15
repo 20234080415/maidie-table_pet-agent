@@ -1,3 +1,9 @@
+"""增量识别流式文本中的句子边界。
+
+ChatStreamer 将输出 chunk 喂入本类；未完成尾句保留在 buffer，完成或取消时显式
+flush/reset，避免半句话提前进入气泡和语音节奏层。
+"""
+
 from __future__ import annotations
 
 

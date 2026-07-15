@@ -1,3 +1,9 @@
+"""保存最近一次结构化 VisionContext，支持短时追问复用。
+
+BrainRouter 用 Session 识别“那怎么修”等省略式追问；这里只保留最新结构化结果、问题和
+回答元数据，不保留原始截图，并通过 TTL 防止陈旧画面长期影响对话。
+"""
+
 from __future__ import annotations
 
 from time import monotonic
@@ -7,7 +13,11 @@ from core.vision.vision_context import VisionContext
 
 
 class VisionSession:
-    """Keeps only the latest structured visual context for short follow-ups."""
+    """保存最近结构化视觉上下文的短期会话对象。
+
+    实例由 VisionService 持有并随应用运行，``clear`` 在用户显式清除或对话重置时调用；
+    ``has_active_session`` 仅判断复用资格，不触发新截图。
+    """
 
     def __init__(self, clock: Callable[[], float] = monotonic) -> None:
         self._clock = clock

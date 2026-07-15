@@ -1,3 +1,9 @@
+"""提供显式启用、低频运行的本地截图/OCR Awareness 降级能力。
+
+ScreenReader 默认禁用，图像在内存中处理并仅输出摘要/文本哈希；生产 Vision Agent 流程
+优先使用 ``VisionService``，本模块不会静默上传截图。
+"""
+
 from __future__ import annotations
 
 import re
@@ -9,7 +15,11 @@ from typing import Any, Callable
 
 
 class ScreenReader:
-    """Opt-in screenshot/OCR reader. Images are processed in memory by default."""
+    """显式启用的截图/OCR reader，默认只在内存中处理图像。
+
+    实例维护调用间隔和最近结果以限制采集频率；``force`` 只能绕过节流，不能绕过
+    ``enabled`` 隐私开关。
+    """
 
     APP_RULES = {
         "vscode": r"visual studio code|vscode|\.py\b|\.js\b|\.ts\b",

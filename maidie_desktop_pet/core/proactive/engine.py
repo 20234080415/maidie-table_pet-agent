@@ -1,3 +1,9 @@
+"""根据空闲、冷却和上下文决定是否提出主动交互。
+
+``ProactiveEngine`` 只返回决策，不直接显示气泡或提交 AI 请求；``ProactiveRuntime`` 和
+``PetController`` 负责节拍与执行，确保主动行为服从当前 Session/状态机。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,6 +14,7 @@ from typing import Any, Callable
 
 @dataclass(frozen=True)
 class ProactiveDecision:
+    """一次主动行为候选及其原因、文案和动作信息。"""
     kind: str
     prompt: str
     action: str = "happy"

@@ -1,3 +1,9 @@
+"""为低风险、可确定识别的请求提供 Brain 快速路由。
+
+规则在 LLM Router 之前处理时间、天气、Vision scope 等明确意图以降低延迟；模糊输入
+返回空结果并交还 ``LLMIntentRouter``，避免正则越权替代语义判断。
+"""
+
 from __future__ import annotations
 
 import re
@@ -39,19 +45,23 @@ PROJECT_CODING_REQUEST = re.compile(
 
 
 def is_simple_time_query(text: str) -> bool:
+    """判断请求是否可由本地 TimeTool 直接、完整回答。"""
     return bool(TIME.search(str(text).strip()))
 
 
 def is_weather_query(text: str) -> bool:
+    """判断文本是否包含天气事实需求，不区分是否还需要建议。"""
     return bool(WEATHER.search(str(text).strip()))
 
 
 def is_simple_weather_query(text: str) -> bool:
+    """区分纯天气事实与需要 LLM 综合判断的复杂天气问题。"""
     value = str(text).strip()
     return is_weather_query(value) and not bool(COMPLEX_WEATHER.search(value))
 
 
 def is_coding_agent_request(text: str) -> bool:
+    """识别明确要求操作项目上下文的 Coding Agent 请求。"""
     value = str(text).strip()
     compact = re.sub(r"[\s'’\"`_-]+", "", value).lower()
     explicitly_calls_cli = (
@@ -62,6 +72,7 @@ def is_coding_agent_request(text: str) -> bool:
 
 
 def fast_route(text: str) -> dict[str, Any] | None:
+    """返回高置信度的标准化 route；无法确定时返回 ``None``。"""
     value = str(text).strip()
     scope = detect_vision_scope(value)
     if scope in {VisionScope.SELECTED_REGION, VisionScope.FULLSCREEN} and is_explicit_scope_request(value):

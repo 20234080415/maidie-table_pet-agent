@@ -1,3 +1,9 @@
+"""执行 BrainPlanner 生成的结构化步骤。
+
+该模块位于 Planner 与 ``ToolRegistry`` 之间：它不生成用户文案，而是把不可信的
+计划参数收敛为受支持的 Tool 调用，并将结果统一成供 Synthesizer 消费的数据。
+"""
+
 from __future__ import annotations
 
 from time import monotonic
@@ -21,11 +27,17 @@ class BrainExecutor:
         self, plan: dict[str, Any], user_input: str,
         on_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> list[dict[str, Any]]:
+        """按顺序执行计划并返回结构化执行记录。
+
+        ``plan`` 来自 Planner，仍需在此校验 Tool allowlist、参数和返回类型；
+        ``on_event`` 仅传递进度事件。单步失败会转成错误数据而不打断整个 Agent 流程。
+        """
         executions = []
         for index, step in enumerate(plan.get("steps", [])):
             tool_name = str(step.get("tool", "")) if isinstance(step, dict) else ""
             try:
                 params = step.get("params", {}) if isinstance(step.get("params"), dict) else {}
+                # 后续步骤可以依赖前序的结构化事实，但不能直接读取自然语言输出。
                 params = self._resolve_dependent_params(tool_name, params, executions)
                 if params is None:
                     continue
@@ -86,7 +98,7 @@ class BrainExecutor:
         if tool is None:
             return self._error(name, f"{name} unavailable")
 
-        # Planner/LLM parameters are data, never trusted authorization.
+        # Planner/LLM 参数只是数据，不能被视为用户授权；确认必须在执行边界重新建立。
         safe_params = dict(params)
         safe_params.pop("confirmed", None)
         try:
