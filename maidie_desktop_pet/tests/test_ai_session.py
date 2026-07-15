@@ -110,10 +110,43 @@ class AISessionTests(unittest.TestCase):
 
     def test_thinking_feedback_varies_by_request_context(self):
         pool = ThinkingFeedbackPool(chooser=lambda phrases: phrases[0])
-        self.assertEqual(pool.choose("看看我的屏幕"), "让我看看。")
-        self.assertEqual(pool.choose("今天天气怎么样"), "嗯，我查一下。")
-        self.assertEqual(pool.choose("CMake 报错"), "我想想。")
-        self.assertGreaterEqual(len(pool.phrases_for("你好")), 4)
+        self.assertEqual(pool.choose("看看我的屏幕"), "让我看看...")
+        self.assertEqual(pool.choose("搜索一下 Maidie"), "好啦，我搜索一下...")
+        self.assertEqual(pool.choose("今天天气怎么样"), "我看看天气情况...")
+        self.assertEqual(pool.choose("CMake 报错"), "我想想...")
+        self.assertEqual(pool.choose("帮我完善 Python 测试"), "我看看这段代码...")
+        self.assertEqual(pool.choose("你还记得上次的话吗"), "让我回想一下...")
+        self.assertGreaterEqual(len(pool.phrases_for("你好")), 8)
+        pool_names = (
+            "SCREEN", "CURSOR", "SEARCH", "TIME", "WEATHER",
+            "CODING", "TECHNICAL", "MEMORY", "CHAT",
+        )
+        for name in pool_names:
+            self.assertTrue(all(
+                phrase.endswith("...") for phrase in getattr(pool, name)
+            ))
+
+    def test_thinking_feedback_avoids_immediate_context_repeat(self):
+        pool = ThinkingFeedbackPool(chooser=lambda phrases: phrases[0])
+
+        first = pool.choose("搜索 Maidie")
+        second = pool.choose("搜索 PyQt6")
+
+        self.assertNotEqual(first, second)
+
+    def test_pet_controller_connects_thinking_feedback_to_visible_stream(self):
+        controller = PetController(Mock(), _Memory())
+        feedback = Mock()
+        controller.message_delta.connect(feedback)
+        controller.ai_session.executor = _Executor(_Future(done=False))
+        controller.ai_session.feedback_pool = ThinkingFeedbackPool(
+            chooser=lambda phrases: phrases[0]
+        )
+
+        controller.ai_session.submit("搜索一下 Maidie")
+
+        feedback.assert_called_once_with("好啦，我搜索一下...")
+        controller.shutdown()
 
     def test_session_emits_feedback_without_second_ai_request(self):
         feedback = Mock()
@@ -127,7 +160,7 @@ class AISessionTests(unittest.TestCase):
 
         session.submit("现在几点")
 
-        feedback.assert_called_once_with("嗯，我查一下。")
+        feedback.assert_called_once_with("我看看现在的时间...")
         self.assertEqual(len(session.executor.calls), 1)
         session.shutdown()
 

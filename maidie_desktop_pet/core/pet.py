@@ -103,6 +103,7 @@ class PetController(QObject):
             self._prepare_ai_request, self._show_stream_fragment,
             self._on_ai_result, self._on_ai_response_completed,
             self.sentence_completed.emit, self,
+            thinking_feedback=self.message_delta.emit,
             output_event=self.output_event.emit,
         )
         self.chat_streamer = self.ai_session.streamer
