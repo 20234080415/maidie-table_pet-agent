@@ -22,6 +22,29 @@ from ui.sprite import HatchPetSprite
 from core.vision.region_selector import RegionSelector
 
 
+def format_system_confirmation(action: str, params: dict) -> str:
+    """Build a content-free UI preview for a confirmation request."""
+    plan = params.get("file_plan") if isinstance(params, dict) else None
+    if isinstance(plan, dict):
+        reasons = ", ".join(str(item) for item in plan.get("risk_reasons", [])) or "无"
+        return "\n".join([
+            f"操作类型：{plan.get('operation') or action}",
+            f"工作区：{plan.get('workspace') or '工作区外单次授权'}",
+            f"源路径：{plan.get('source') or '无'}",
+            f"目标路径：{plan.get('destination') or '无'}",
+            f"目标已存在：{'是' if plan.get('destination_exists') else '否'}",
+            f"覆盖：{'是' if plan.get('overwrite') else '否'}",
+            f"风险等级：{plan.get('risk') or 'unknown'}",
+            f"风险原因：{reasons}",
+            f"预计影响数量：{int(plan.get('estimated_items') or 0)}",
+        ])
+    safe_params = {
+        key: value for key, value in (params.items() if isinstance(params, dict) else [])
+        if key not in {"content", "text", "authorization", "fingerprint"}
+    }
+    return f"操作类型：{action}\n参数：{safe_params}"
+
+
 class PetWindow(QWidget):
     """Presentation-only window: renders controller signals and forwards input."""
 
@@ -199,7 +222,7 @@ class PetWindow(QWidget):
     def _confirm_system_action(self, request: dict) -> None:
         action = str(request.get("action", "system action"))
         params = request.get("params", {})
-        safe_params = {key: value for key, value in params.items() if key not in {"content", "text"}}
+        safe_params = format_system_confirmation(action, params)
         answer = QMessageBox.question(
             self,
             "Maidie 请求系统权限",

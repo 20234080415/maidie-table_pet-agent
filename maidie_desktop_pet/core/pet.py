@@ -321,6 +321,9 @@ class PetController(QObject):
         coding_tool = self.ai_router.executor.tool_registry.get("coding_agent")
         if coding_tool is not None and hasattr(coding_tool, "configure"):
             coding_tool.configure(config.get("workspace", {}), config.get("coding_agent", {}))
+        system_tool = self.ai_router.executor.tool_registry.get("system")
+        if system_tool is not None and hasattr(system_tool, "configure"):
+            system_tool.configure(config.get("workspace", {}))
         public = self.config_store.public_settings()
         self.settings_changed.emit(public)
         self._broadcast("on_settings_changed", public)

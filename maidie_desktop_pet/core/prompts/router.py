@@ -16,7 +16,11 @@ Required schema:
     "time_text": null,
     "event": null,
     "location": null,
-    "query": null
+    "query": null,
+    "operation": null,
+    "source": null,
+    "destination": null,
+    "content": null
   },
   "needs_tools": false,
   "confidence": 0.0,
@@ -32,6 +36,10 @@ Classification rules:
 - Never classify time_now or time_delta as vision merely because current information is needed.
 - Weather requests are task / weather; extract location when present.
 - Explicit web lookup requests are task / search; remove the lookup command and place the subject in query.
+- File requests are system_task / file. operation must be one of list_directory, stat_file,
+  search_files, read_text_file, create_text_file, copy_file, move_file, or rename_file.
+  Extract only operation, source, destination, and content. Never emit risk, confirmation,
+  resolved paths, fingerprints, or authorization.
 - Use vision or screen_understanding only for an explicit request to inspect a screen, window,
   screenshot, image, or visible software. A bare "帮我看看" is clarification.
 - Coding, debugging, build-file explanation, and refactoring requests are code_task.

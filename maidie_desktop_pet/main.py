@@ -126,7 +126,11 @@ def build_application() -> tuple[QApplication, object, PetController, InputManag
     network_plugin = NetworkPlugin(config.get("network", {}))
     memory = ConversationMemory(ROOT / "memory" / "memories.db")
     confirmation_broker = ConfirmationBroker()
-    system_tool = SystemTool(confirmation_callback=confirmation_broker.request)
+    system_tool = SystemTool(
+        confirmation_callback=confirmation_broker.request,
+        workspace=config.get("workspace", {}),
+        audit_path=ROOT / "logs" / "file_operations.jsonl",
+    )
     proactive_options = config.get("proactive", {})
     vision_options = config.get("vision", {})
     idle_detector = IdleDetector(float(proactive_options.get("idle_trigger_seconds", 300)))

@@ -38,21 +38,27 @@ class AgentV3Tests(unittest.TestCase):
         })
 
     def test_system_tool_safety(self):
-        denied = SystemTool(confirmation_callback=lambda action, params: False)
-        result = denied.execute("create_file", {"path": "never-created.txt"})
-        self.assertTrue(result["raw"]["denied"])
-        self.assertTrue(denied.execute("system_command", {"command": "whoami"})["raw"]["denied"])
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as folder:
+            denied = SystemTool(
+                workspace={"root": folder},
+                confirmation_callback=lambda action, params: False,
+                audit_path=Path(folder) / "audit.jsonl",
+            )
+            result = denied.execute("create_file", {"path": str(Path(folder) / "never-created.txt")})
+            self.assertTrue(result["raw"]["denied"])
+            self.assertTrue(denied.execute("system_command", {"command": "whoami"})["raw"]["denied"])
             path = Path(folder) / "safe.txt"
             path.write_text("safe data", encoding="utf-8")
             result = denied.execute("read_file", {"path": str(path)})
             self.assertEqual(result["raw"]["content"], "safe data")
 
     def test_executor_flow(self):
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as folder:
             source = Path(folder) / "source.txt"
             source.write_text("hello", encoding="utf-8")
-            system = SystemTool(confirmation_callback=lambda action, params: True)
+            system = SystemTool(workspace={"root": folder},
+                                confirmation_callback=lambda action, params: True,
+                                audit_path=Path(folder) / "audit.jsonl")
             executor = ToolExecutor(ToolRegistry([system]), FakeSearch(), FakeMemory())
             plan = {"goal": "read", "steps": [
                 {"tool": "system", "action": "read_file",

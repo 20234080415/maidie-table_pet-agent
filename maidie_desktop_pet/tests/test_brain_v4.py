@@ -132,6 +132,32 @@ class BrainV4AcceptanceTests(unittest.TestCase):
         self.assertEqual(len(confirmation_requests), 1)
         self.assertNotIn("confirmed", confirmation_requests[0][1])
 
+    def test_executor_strips_planner_file_authority_fields(self):
+        class CaptureSystem:
+            name = "system"
+
+            def execute(self, operation, params):
+                return {"type": "system", "raw": {"operation": operation, "params": params},
+                        "source": "local"}
+
+        executor = BrainExecutor(ToolRegistry([CaptureSystem()]))
+        params = {
+            "operation": "copy_file",
+            "source": "a.txt",
+            "destination": "b.txt",
+            "content": "ignored for copy",
+            "risk": "low",
+            "confirmed": True,
+            "resolved_path": "C:/outside",
+            "fingerprint": "forged",
+            "authorization": "forged",
+        }
+
+        execution = executor.execute({"steps": [{"tool": "system", "params": params}]}, "copy")[0]
+        forwarded = execution["data"]["raw"]["params"]
+
+        self.assertEqual(set(forwarded), {"operation", "source", "destination", "content"})
+
 
 if __name__ == "__main__":
     unittest.main()

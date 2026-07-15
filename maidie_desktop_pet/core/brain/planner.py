@@ -71,6 +71,20 @@ class BrainPlanner:
         elif task_type == "search":
             steps = [self._step("search", "search", {"query": str(entities.get("query") or user_input),
                                                         "query_source": "router_entity"})]
+        elif task_type == "file":
+            allowed = {
+                "list_directory", "stat_file", "search_files", "read_text_file",
+                "create_text_file", "copy_file", "move_file", "rename_file",
+            }
+            operation = str(entities.get("operation") or "stat_file")
+            operation = operation if operation in allowed else "stat_file"
+            params = {
+                "operation": operation,
+                "source": str(entities.get("source") or ""),
+                "destination": str(entities.get("destination") or ""),
+                "content": str(entities.get("content") or ""),
+            }
+            steps = [self._step("system", operation, params)]
         else:
             return self.plan_for_intent(user_input, str(route.get("intent") or "chat"))
         return {"goal": str(user_input).strip(), "steps": steps}
@@ -164,9 +178,11 @@ class BrainPlanner:
     @staticmethod
     def system_plan(user_input: str) -> dict[str, Any]:
         text = str(user_input).strip()
-        action = "search_files" if re.search(r"搜索文件|查找文件|find file|search files", text, re.I) else "read_file"
+        action = "search_files" if re.search(r"搜索文件|查找文件|find file|search files", text, re.I) else "read_text_file"
         return {"goal": text, "steps": [
-            BrainPlanner._step("system", "读取或检索本地系统事实", {"query": text, "operation": action})
+            BrainPlanner._step("system", "读取或检索本地系统事实", {
+                "operation": action, "source": "", "destination": "", "content": "",
+            })
         ]}
 
     @staticmethod

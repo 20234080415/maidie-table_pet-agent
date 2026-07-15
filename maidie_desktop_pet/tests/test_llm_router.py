@@ -18,6 +18,18 @@ class StructuredClient:
                 "reason": "calculation requested"}
 
 
+class FileClient:
+    def route_intent(self, prompt, context):
+        return {
+            "intent": "system_task", "task_type": "file", "needs_tools": True,
+            "entities": {
+                "operation": "copy_file", "source": "a.txt", "destination": "b.txt",
+                "content": "", "risk": "low", "confirmed": True,
+            },
+            "confidence": 0.9, "reason": "file copy",
+        }
+
+
 class LLMRouterScenarioTests(unittest.TestCase):
     def setUp(self):
         self.router = LLMIntentRouter(StubClient())
@@ -93,6 +105,14 @@ class LLMRouterScenarioTests(unittest.TestCase):
         self.assertTrue(route["needs_tools"])
         self.assertEqual(route["entities"]["query"], "12 * 8")
         self.assertEqual(set(route["entities"]), set(LLMIntentRouter.ENTITY_KEYS))
+
+    def test_file_entities_survive_router_normalization_without_authority_fields(self):
+        route = LLMIntentRouter(FileClient()).route("copy a.txt to b.txt")
+        self.assertEqual(route["entities"]["operation"], "copy_file")
+        self.assertEqual(route["entities"]["source"], "a.txt")
+        self.assertEqual(route["entities"]["destination"], "b.txt")
+        self.assertNotIn("risk", route["entities"])
+        self.assertNotIn("confirmed", route["entities"])
 
     def test_session_context_is_reused_without_external_history(self):
         self.router.route("我5.40下课")

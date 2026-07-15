@@ -61,7 +61,9 @@
     "interval_seconds": 60
   },
   "workspace": {
-    "root": ""
+    "root": "",
+    "workspaces": [],
+    "allow_home_read_only": true
   },
   "coding_agent": {
     "enabled": false,

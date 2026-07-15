@@ -10,6 +10,7 @@ from time import monotonic
 from typing import Any, Callable
 
 from core.performance import mark
+from core.tools.file_permissions import FILE_OPERATIONS
 
 
 class BrainExecutor:
@@ -99,12 +100,20 @@ class BrainExecutor:
             return self._error(name, f"{name} unavailable")
 
         # Planner/LLM 参数只是数据，不能被视为用户授权；确认必须在执行边界重新建立。
-        safe_params = dict(params)
-        safe_params.pop("confirmed", None)
+        forbidden = {
+            "confirmed", "risk", "resolved", "resolved_path", "resolved_source",
+            "resolved_destination", "fingerprint", "authorization", "plan_id",
+        }
+        safe_params = {key: value for key, value in params.items() if key not in forbidden}
         try:
             if name == "system" and hasattr(tool, "execute"):
                 operation = str(safe_params.get("operation") or safe_params.get("action") or "")
                 if operation:
+                    if operation in FILE_OPERATIONS:
+                        safe_params = {
+                            key: value for key, value in safe_params.items()
+                            if key in {"operation", "source", "destination", "content"}
+                        }
                     return tool.execute(operation, safe_params)
             if name == "memory":
                 return tool.run(

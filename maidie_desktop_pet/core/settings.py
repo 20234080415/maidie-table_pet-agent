@@ -46,7 +46,7 @@ VISION_DEFAULTS = {
     "cursor_region_height": 800,
 }
 FENCE_DEFAULTS = {"show_overlay": True}
-WORKSPACE_DEFAULTS = {"root": ""}
+WORKSPACE_DEFAULTS = {"root": "", "workspaces": [], "allow_home_read_only": True}
 CODING_AGENT_DEFAULTS = {
     "enabled": False,
     "provider": "opencode",
@@ -92,7 +92,7 @@ class ConfigStore:
                 fence.setdefault(key, value)
             workspace = config.setdefault("workspace", {})
             for key, value in WORKSPACE_DEFAULTS.items():
-                workspace.setdefault(key, value)
+                workspace.setdefault(key, deepcopy(value))
             coding_agent = config.setdefault("coding_agent", {})
             for key, value in CODING_AGENT_DEFAULTS.items():
                 coding_agent.setdefault(key, value)
@@ -173,6 +173,8 @@ class ConfigStore:
             "vision_cursor_region_width": int(vision.get("cursor_region_width", 1000)),
             "vision_cursor_region_height": int(vision.get("cursor_region_height", 800)),
             "workspace_root": str(workspace.get("root", "")),
+            "workspace_workspaces": deepcopy(workspace.get("workspaces", [])),
+            "workspace_allow_home_read_only": bool(workspace.get("allow_home_read_only", True)),
             "coding_agent_enabled": bool(coding_agent.get("enabled", False)),
             "coding_agent_provider": str(coding_agent.get("provider", "opencode")),
             "coding_agent_command": str(coding_agent.get("command", "opencode")),

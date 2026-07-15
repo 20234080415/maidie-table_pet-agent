@@ -89,7 +89,9 @@ class ConfigStoreTests(unittest.TestCase):
 
     def test_legacy_config_is_completed_with_coding_agent_fields(self):
         saved = self.store.load()
-        self.assertEqual(saved["workspace"], {"root": ""})
+        self.assertEqual(saved["workspace"], {
+            "root": "", "workspaces": [], "allow_home_read_only": True,
+        })
         self.assertEqual(set(saved["coding_agent"]), {
             "enabled", "provider", "command", "timeout_seconds", "dry_run",
             "idle_timeout_seconds",

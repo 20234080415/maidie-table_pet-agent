@@ -18,6 +18,89 @@ from core.tools.base import Tool, ToolResult
 from core.tools.coding_agent_process import CodingAgentProcessRunner
 
 
+class _OpenCodeJsonStream:
+    """Turn OpenCode JSONL protocol records into short, useful UI messages."""
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._text_parts: list[str] = []
+        self.protocol_errors = 0
+
+    @property
+    def final_text(self) -> str:
+        return "\n".join(part for part in self._text_parts if part).strip()
+
+    def feed(self, stream: str, chunk: str) -> list[dict[str, str]]:
+        if stream != "stdout":
+            content = str(chunk or "").strip()
+            if not content:
+                return []
+            return [{"stream": "stderr", "line": self._short(content, 500)}]
+        self._buffer += str(chunk or "")
+        visible: list[dict[str, str]] = []
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            message = self._parse_line(line)
+            if message:
+                visible.append({"stream": "status", "line": message})
+        return visible
+
+    def finish(self) -> list[dict[str, str]]:
+        if not self._buffer.strip():
+            self._buffer = ""
+            return []
+        message = self._parse_line(self._buffer)
+        self._buffer = ""
+        return [{"stream": "status", "line": message}] if message else []
+
+    def _parse_line(self, line: str) -> str:
+        text = line.strip()
+        if not text:
+            return ""
+        try:
+            event = json.loads(text)
+        except json.JSONDecodeError:
+            self.protocol_errors += 1
+            return "OpenCode 输出协议异常，原始内容已写入日志"
+        if not isinstance(event, dict):
+            return ""
+        event_type = str(event.get("type") or "")
+        part = event.get("part") if isinstance(event.get("part"), dict) else {}
+        if event_type == "text":
+            final_text = str(part.get("text") or "")
+            if final_text:
+                self._text_parts.append(final_text)
+                return "OpenCode 已生成结构化结果"
+            return ""
+        if event_type == "tool_use":
+            return self._tool_message(part)
+        if event_type in {"error", "session_error"}:
+            detail = str(event.get("error") or part.get("error") or "未知错误")
+            return "OpenCode 错误：" + self._short(detail, 300)
+        return ""
+
+    @classmethod
+    def _tool_message(cls, part: dict[str, Any]) -> str:
+        tool = str(part.get("tool") or "工具").lower()
+        state = part.get("state") if isinstance(part.get("state"), dict) else {}
+        inputs = state.get("input") if isinstance(state.get("input"), dict) else {}
+        if tool == "read":
+            target = Path(str(inputs.get("filePath") or "文件")).name or "文件"
+            return f"OpenCode 正在读取 {cls._short(target, 120)}"
+        if tool in {"grep", "search"}:
+            pattern = str(inputs.get("pattern") or inputs.get("query") or "代码")
+            return f"OpenCode 正在搜索 {cls._short(pattern, 120)}"
+        if tool in {"glob", "find"}:
+            pattern = str(inputs.get("pattern") or "文件")
+            return f"OpenCode 正在查找 {cls._short(pattern, 120)}"
+        return f"OpenCode 正在使用 {cls._short(tool, 80)}"
+
+    @staticmethod
+    def _short(text: str, limit: int) -> str:
+        one_line = " ".join(str(text).split())
+        return one_line if len(one_line) <= limit else one_line[:limit] + "…"
+
+
 class CodingAgentTool(Tool):
     """面向 BrainExecutor 的本地 Coding Agent 适配器。
 
@@ -111,16 +194,38 @@ class CodingAgentTool(Tool):
         if not executable:
             return self._error(base, source, "cli_not_found", "未安装 OpenCode/Codex，或未配置可用路径")
 
-        timeout = max(1, min(600, int(self.options.get("timeout_seconds", 120))))
+        startup_timeout = max(
+            1, min(60, int(self.options.get("startup_timeout_seconds", 10)))
+        )
+        total_timeout = max(1, min(600, int(
+            self.options.get("total_timeout_seconds",
+                             self.options.get("timeout_seconds", 120))
+        )))
+        no_progress_timeout = max(1, min(300, int(
+            self.options.get("no_progress_timeout_seconds",
+                             self.options.get("idle_timeout_seconds", 30))
+        )))
         prompt = self._prompt(query, operation, target_path)
         args, input_text, env = self._command(provider, executable, prompt)
+        protocol = _OpenCodeJsonStream() if provider == "opencode" else None
+
         def forward(name: str, payload: dict[str, Any]) -> None:
             callback = self.callbacks.get(name)
-            if callback is not None:
+            # A normal Brain request already travels through generation-checked
+            # OutputEvent. Keep the legacy direct callbacks only for callers
+            # that did not supply that event path, otherwise the console sees
+            # every event twice.
+            if callback is not None and on_event is None:
                 callback(payload)
             if on_event is None:
                 return
-            if name == "on_output_line":
+            if name == "on_start":
+                on_event({
+                    "type": "progress", "mode": "TASK_PROGRESS",
+                    "content": f"Coding Agent 已启动\nPID: {payload.get('pid')}",
+                    "source": source, "tool": self.name, "phase": "running",
+                })
+            elif name == "on_output_line":
                 on_event({
                     "type": "token", "mode": "TASK_STREAM",
                     "content": str(payload.get("line") or ""),
@@ -128,10 +233,12 @@ class CodingAgentTool(Tool):
                     "tool": self.name, "phase": "output",
                 })
             elif name == "on_status_change":
+                status = str(payload.get("status") or "running")
                 on_event({
-                    "type": "progress", "mode": "TASK_PROGRESS", "content": "",
+                    "type": "progress", "mode": "TASK_PROGRESS",
+                    "content": str(payload.get("content") or ""),
                     "source": source, "tool": self.name,
-                    "phase": str(payload.get("status") or "running"),
+                    "phase": "heartbeat" if status == "running" else status,
                 })
             elif name == "on_finish":
                 on_event({
@@ -140,31 +247,59 @@ class CodingAgentTool(Tool):
                     "phase": str(payload.get("status") or "failed"),
                 })
 
+        def handle_output(payload: dict[str, Any]) -> None:
+            if protocol is None:
+                forward("on_output_line", payload)
+                return
+            for visible in protocol.feed(
+                str(payload.get("stream") or "stdout"),
+                str(payload.get("line") or ""),
+            ):
+                forward("on_output_line", visible)
+
+        def handle_status(payload: dict[str, Any]) -> None:
+            if str(payload.get("status") or "running") == "running":
+                forward("on_status_change", payload)
+
         process_result = self.runner.run(
-            args, str(root), input_text=input_text, timeout=timeout,
-            # OpenCode can spend a long time reading files without emitting a
-            # complete line. Its total timeout still applies, but line silence
-            # must not be treated as a hung process.
-            idle_timeout=(None if provider == "opencode" else
-                          max(5, min(120, int(self.options.get("idle_timeout_seconds", 30))))),
+            args, str(root), input_text=input_text,
+            startup_timeout=startup_timeout,
+            total_timeout=total_timeout,
+            no_progress_timeout=no_progress_timeout,
             env=env, on_start=lambda payload: forward("on_start", payload),
-            on_output_line=lambda payload: forward("on_output_line", payload),
-            on_status_change=lambda payload: forward("on_status_change", payload),
-            on_finish=lambda payload: forward("on_finish", payload),
+            on_output_line=handle_output,
+            on_status_change=handle_status,
+            on_finish=None,
         )
-        base["process"] = process_result
+        if protocol is not None:
+            for visible in protocol.finish():
+                forward("on_output_line", visible)
+        base["process"] = self._public_process_result(process_result)
         base["stderr"] = process_result.get("stderr_tail", "")
         status = str(process_result.get("status") or "failed")
         if status != "completed":
             messages = {
-                "timeout": "Coding Agent 超时，已终止进程树",
-                "idle_timeout": "Coding Agent 无输出超时，可能正在等待配置",
+                "startup_timeout": "Coding Agent 启动超时，进程未能在期限内启动",
+                "startup_failed": "Coding Agent 进程无法启动",
+                "total_timeout": "Coding Agent 达到任务总时限，已终止进程树",
+                "no_progress_timeout": "Coding Agent 长时间没有输出或状态进展，已终止进程树",
                 "needs_setup": "OpenCode 需要配置模型 provider / API Key",
                 "cancelled": "用户已取消本次 Coding Agent 任务",
                 "failed": "Coding Agent CLI 执行失败",
             }
+            forward("on_finish", {"status": status})
             return self._error(base, source, status, messages.get(status, "Coding Agent 执行失败"))
-        self._merge_output(base, str(process_result.get("stdout_tail") or ""))
+        stdout = str(
+            process_result.get("stdout")
+            if process_result.get("stdout") is not None
+            else process_result.get("stdout_tail") or ""
+        )
+        final_output = (
+            protocol.final_text or self._extract_opencode_text(stdout)
+            if protocol is not None else stdout
+        )
+        self._merge_output(base, final_output)
+        forward("on_finish", {"status": status})
         return {"type": self.name, "raw": base, "source": source}
 
     @staticmethod
@@ -191,7 +326,7 @@ class CodingAgentTool(Tool):
         })
         env["NO_COLOR"] = "1"
         env["FORCE_COLOR"] = "0"
-        return [executable, "run", prompt], None, env
+        return [executable, "run", "--format", "json", prompt], None, env
 
     @staticmethod
     def _prompt(query: str, operation: str, target_path: str) -> str:
@@ -211,22 +346,72 @@ class CodingAgentTool(Tool):
             "suggested_changes": [],
             "patch_preview": "",
             "tests_suggested": [],
+            "parse_status": "not_attempted",
+            "parse_error": "",
+            "raw_output": "",
         }
+
+    @staticmethod
+    def _public_process_result(result: dict[str, Any]) -> dict[str, Any]:
+        """Keep diagnostics without sending raw JSONL/tool payloads to Synthesizer."""
+        keys = (
+            "status", "returncode", "pid", "duration_seconds",
+            "last_output_age_seconds", "lines_captured",
+            "killed_process_tree", "log_path",
+        )
+        return {key: result.get(key) for key in keys if key in result}
+
+    @staticmethod
+    def _extract_opencode_text(stdout: str) -> str:
+        text_parts: list[str] = []
+        saw_protocol_event = False
+        for line in str(stdout or "").splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict) or "type" not in event:
+                continue
+            saw_protocol_event = True
+            part = event.get("part") if isinstance(event.get("part"), dict) else {}
+            if event.get("type") == "text" and part.get("text"):
+                text_parts.append(str(part["text"]))
+        if text_parts:
+            return "\n".join(text_parts).strip()
+        # Compatibility for mocked/older OpenCode wrappers that return the
+        # requested result object directly rather than JSONL envelopes.
+        return "" if saw_protocol_event else str(stdout or "").strip()
 
     @staticmethod
     def _merge_output(raw: dict[str, Any], stdout: str) -> None:
         output = (stdout or "").strip()
-        fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", output, re.IGNORECASE | re.DOTALL)
+        raw["raw_output"] = output
+        fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", output, re.IGNORECASE | re.DOTALL)
         if fenced:
             output = fenced.group(1).strip()
         try:
             parsed = json.loads(output)
-        except (TypeError, json.JSONDecodeError):
-            raw["summary"] = output
-            return
+        except (TypeError, json.JSONDecodeError) as exc:
+            parsed = None
+            decoder = json.JSONDecoder()
+            for match in re.finditer(r"\{", output):
+                try:
+                    candidate, _ = decoder.raw_decode(output[match.start():])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(candidate, dict):
+                    parsed = candidate
+                    break
+            if parsed is None:
+                raw["parse_status"] = "error"
+                raw["parse_error"] = f"JSON 解析失败: {exc}"
+                return
         if not isinstance(parsed, dict):
-            raw["summary"] = output
+            raw["parse_status"] = "error"
+            raw["parse_error"] = "JSON 解析失败: 顶层结果不是对象"
             return
+        raw["parse_status"] = "parsed"
+        raw["parse_error"] = ""
         raw["summary"] = str(parsed.get("summary") or "")
         raw["findings"] = parsed.get("findings") if isinstance(parsed.get("findings"), list) else []
         raw["suggested_changes"] = (parsed.get("suggested_changes")

@@ -19,7 +19,10 @@ class LLMIntentRouter:
     """LLM-first intent gate with regex fallback only for failures."""
 
     INTENTS = {"chat", "task", "vision", "clarification", "code_task", "system_task"}
-    ENTITY_KEYS = ("target_time_text", "time_text", "event", "location", "query")
+    ENTITY_KEYS = (
+        "target_time_text", "time_text", "event", "location", "query",
+        "operation", "source", "destination", "content",
+    )
     PROMPT = ROUTER_PROMPT
 
     def __init__(self, client: Any, fallback: IntentClassifier | None = None) -> None:

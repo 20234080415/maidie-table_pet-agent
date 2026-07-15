@@ -15,6 +15,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core.tools.base import Tool, ToolResult
+from core.tools.file_operations import FileOperationService
+from core.tools.file_permissions import (
+    FILE_OPERATIONS,
+    FileAuthorization,
+    FilePermissionError,
+    FilePermissionPolicy,
+)
 
 
 class SystemTool(Tool):
@@ -25,17 +32,31 @@ class SystemTool(Tool):
     """
 
     name = "system"
-    DANGEROUS_ACTIONS = {"delete_file", "execute_script", "system_command"}
+    DANGEROUS_ACTIONS = {"delete_file", "execute_script", "system_command", "screenshot"}
     CONFIRMATION_ACTIONS = {"create_file", "open_app", "open_folder", "switch_window", "copy_clipboard"}
-    READ_ONLY_ACTIONS = {"read_file", "search_files", "screenshot"}
+    READ_ONLY_ACTIONS = {"read_file", "search_files"}
+    FILE_ALIASES = {"read_file": "read_text_file", "create_file": "create_text_file"}
     APPS = {"notepad": ["notepad.exe"], "vscode": ["code"],
             "chrome": ["cmd", "/c", "start", "", "chrome"]}
     PATTERN = re.compile(r"读取文件|搜索文件|查找文件|创建文件|打开应用|打开文件夹|切换窗口|截图|剪贴板|notepad|vscode|chrome", re.I)
 
     def __init__(self, confirmation_callback: Callable[[str, dict[str, Any]], bool] | None = None,
-                 clipboard_writer: Callable[[str], None] | None = None) -> None:
+                 clipboard_writer: Callable[[str], None] | None = None,
+                 workspace: dict[str, Any] | None = None,
+                 audit_path: str | Path | None = None) -> None:
         self.confirmation_callback = confirmation_callback
         self.clipboard_writer = clipboard_writer or self._write_clipboard
+        self._audit_path = audit_path
+        self.file_policy = FilePermissionPolicy(workspace)
+        self.file_operations = FileOperationService(
+            self.file_policy, confirmation_callback, audit_path,
+        )
+
+    def configure(self, workspace: dict[str, Any] | None = None) -> None:
+        self.file_policy = FilePermissionPolicy(workspace)
+        self.file_operations = FileOperationService(
+            self.file_policy, self.confirmation_callback, self._audit_path,
+        )
 
     def match(self, query: str) -> bool:
         return bool(self.PATTERN.search(query))
@@ -51,12 +72,40 @@ class SystemTool(Tool):
         主动移除 Planner 伪造的同名参数。
         """
         params = dict(params or {})
+        file_action = self.FILE_ALIASES.get(action, action)
+        if file_action in FILE_OPERATIONS:
+            file_params = self._normalize_file_params(action, params)
+            raw = self.file_operations.execute(file_action, file_params)
+            verification = raw.get("verification")
+            if isinstance(verification, dict):
+                # Preserve the legacy flat ToolResult facts while keeping the
+                # authoritative verification block for new callers.
+                raw = {**raw, **verification}
+            return {"type": "system", "raw": raw, "source": "local"}
         if action in self.DANGEROUS_ACTIONS:
             return self._denied(action, "dangerous action is not implemented")
         if action not in self.READ_ONLY_ACTIONS | self.CONFIRMATION_ACTIONS:
             return self._denied(action, "unsupported action")
         if action in self.CONFIRMATION_ACTIONS and not confirmed:
-            if not self.confirmation_callback or not self.confirmation_callback(action, params):
+            confirmation_params = params
+            if action == "open_folder":
+                try:
+                    plan = self.file_policy.build_plan("stat_file", source=str(params.get("path", "")))
+                    confirmation_params = {"file_plan": {
+                        **plan.preview(), "operation": "open_folder", "risk": "medium",
+                        "risk_reasons": ["open_folder", *plan.risk_reasons],
+                    }}
+                    if not self.confirmation_callback or not self.confirmation_callback(
+                            action, confirmation_params):
+                        return self._denied(action, "user confirmation required")
+                    authorization = FileAuthorization.issue(plan)
+                    authorization.validate(plan)
+                    self.file_policy.revalidate(plan)
+                    confirmed = True
+                except FilePermissionError as exc:
+                    return self._denied(action, str(exc))
+            if not confirmed and (not self.confirmation_callback
+                                  or not self.confirmation_callback(action, confirmation_params)):
                 return self._denied(action, "user confirmation required")
         try:
             raw = getattr(self, f"_{action}")(params)
@@ -67,6 +116,18 @@ class SystemTool(Tool):
     @staticmethod
     def _denied(action: str, reason: str) -> ToolResult:
         return {"type": "system", "raw": {"action": action, "error": reason, "denied": True}, "source": "local"}
+
+    def _normalize_file_params(self, action: str, params: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(params)
+        if action == "read_file":
+            normalized["source"] = normalized.get("source") or normalized.get("path")
+        elif action == "create_file":
+            normalized["destination"] = normalized.get("destination") or normalized.get("path")
+        elif action == "search_files":
+            normalized["source"] = normalized.get("source") or normalized.get("root")
+            if not normalized.get("source") and self.file_policy.primary is not None:
+                normalized["source"] = str(self.file_policy.primary.root)
+        return normalized
 
     @staticmethod
     def _read_file(params: dict[str, Any]) -> dict[str, Any]:
